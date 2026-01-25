@@ -2,7 +2,7 @@ import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { createProxyMiddleware } from "http-proxy-middleware";
 import express from "express";
-import { parseTextWithLLM, getAvailableModels, isOpenRouterConfigured } from "./llm-service";
+import { parseTextWithLLM, parseTextWithLLMStreaming, getAvailableModels, isOpenRouterConfigured } from "./llm-service";
 
 const PYTHON_BACKEND_URL = process.env.PYTHON_BACKEND_URL || "http://127.0.0.1:8000";
 
@@ -93,6 +93,114 @@ export async function registerRoutes(
         error: 'Failed to parse text',
         message: error instanceof Error ? error.message : 'Unknown error'
       });
+    }
+  });
+
+  // Streaming LLM parsing endpoint with SSE
+  app.post('/api/parse-text-llm-stream', express.json(), async (req: Request, res: Response) => {
+    try {
+      const { text, model, knownSpeakers } = req.body as { 
+        text: string; 
+        model?: string;
+        knownSpeakers?: string[];
+      };
+      
+      if (!text || typeof text !== 'string') {
+        return res.status(400).json({ error: 'Text is required' });
+      }
+
+      // Check if OpenRouter is configured
+      if (!isOpenRouterConfigured()) {
+        console.log('OpenRouter not configured, falling back to basic parsing');
+        const fallbackResult = await fallbackToBasicParsing(text);
+        return res.json({
+          ...fallbackResult,
+          _fallback: true,
+          _fallbackReason: 'OpenRouter not configured'
+        });
+      }
+
+      // Set up SSE headers
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.flushHeaders();
+
+      const speakers = Array.isArray(knownSpeakers) ? knownSpeakers : [];
+      const streamGenerator = parseTextWithLLMStreaming(text, model, speakers);
+      
+      let allSegments: any[] = [];
+      let allSpeakers: string[] = [];
+      let currentPos = 0;
+      
+      for await (const update of streamGenerator) {
+        if (update.type === 'error') {
+          res.write(`data: ${JSON.stringify({ type: 'error', error: update.error })}\n\n`);
+          res.end();
+          return;
+        }
+        
+        if (update.type === 'progress') {
+          res.write(`data: ${JSON.stringify({ 
+            type: 'progress', 
+            chunkIndex: update.chunkIndex, 
+            totalChunks: update.totalChunks 
+          })}\n\n`);
+        }
+        
+        if (update.type === 'chunk' && update.segments) {
+          // Process segments with proper positions
+          const processedSegments = update.segments.map((seg, index) => {
+            const segmentText = seg.text;
+            const startIdx = text.indexOf(segmentText, currentPos);
+            const startIndex = startIdx >= 0 ? startIdx : currentPos;
+            const endIndex = startIndex + segmentText.length;
+            currentPos = endIndex;
+            
+            return {
+              id: `seg-${Date.now()}-${allSegments.length + index}`,
+              type: seg.type,
+              text: segmentText,
+              speaker: seg.speaker,
+              sentiment: { label: "neutral" as const, score: 0.5 },
+              startIndex,
+              endIndex,
+            };
+          });
+          
+          allSegments.push(...processedSegments);
+          allSpeakers = update.detectedSpeakers || [];
+          
+          res.write(`data: ${JSON.stringify({ 
+            type: 'chunk', 
+            chunkIndex: update.chunkIndex, 
+            totalChunks: update.totalChunks,
+            segments: processedSegments,
+            detectedSpeakers: allSpeakers
+          })}\n\n`);
+        }
+        
+        if (update.type === 'complete') {
+          res.write(`data: ${JSON.stringify({ 
+            type: 'complete', 
+            totalSegments: allSegments.length,
+            detectedSpeakers: allSpeakers
+          })}\n\n`);
+        }
+      }
+      
+      res.end();
+    } catch (error) {
+      console.error('Streaming parse error:', error);
+      if (!res.headersSent) {
+        res.status(500).json({ 
+          error: 'Failed to parse text',
+          message: error instanceof Error ? error.message : 'Unknown error'
+        });
+      } else {
+        res.write(`data: ${JSON.stringify({ type: 'error', error: 'Stream error' })}\n\n`);
+        res.end();
+      }
     }
   });
 

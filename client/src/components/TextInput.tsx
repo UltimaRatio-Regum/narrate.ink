@@ -1,8 +1,9 @@
 import { useState, useRef } from "react";
-import { Upload, FileText, Sparkles, Brain, ChevronDown, Users } from "lucide-react";
+import { Upload, FileText, Sparkles, Brain, ChevronDown, Users, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
+import { Progress } from "@/components/ui/progress";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import {
   DropdownMenu,
@@ -21,6 +22,9 @@ interface TextInputProps {
   onChange: (text: string) => void;
   onAnalyze: (useLLM: boolean, model?: string, knownSpeakers?: string[]) => void;
   isAnalyzing: boolean;
+  parseProgress?: number;
+  parseCurrentChunk?: number;
+  parseTotalChunks?: number;
 }
 
 const LLM_MODELS = [
@@ -32,13 +36,23 @@ const LLM_MODELS = [
   { id: "deepseek/deepseek-chat", name: "DeepSeek Chat" },
 ];
 
-export function TextInput({ value, onChange, onAnalyze, isAnalyzing }: TextInputProps) {
+export function TextInput({ 
+  value, 
+  onChange, 
+  onAnalyze, 
+  isAnalyzing,
+  parseProgress = 0,
+  parseCurrentChunk = 0,
+  parseTotalChunks = 0,
+}: TextInputProps) {
   const [isDragOver, setIsDragOver] = useState(false);
   const [selectedModel, setSelectedModel] = useState(LLM_MODELS[0]);
   const [useLLM, setUseLLM] = useState(true);
   const [speakerInput, setSpeakerInput] = useState("");
   const [showSpeakerInput, setShowSpeakerInput] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  const showProgress = isAnalyzing && parseTotalChunks > 0;
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -176,6 +190,24 @@ export function TextInput({ value, onChange, onAnalyze, isAnalyzing }: TextInput
           </Collapsible>
         )}
 
+        {showProgress && (
+          <div className="space-y-2 p-3 rounded-md bg-primary/5 border border-primary/20" data-testid="parse-progress-container">
+            <div className="flex items-center justify-between text-sm">
+              <div className="flex items-center gap-2 text-primary">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>Analyzing text with AI...</span>
+              </div>
+              <span className="text-muted-foreground">
+                Chunk {parseCurrentChunk} of {parseTotalChunks}
+              </span>
+            </div>
+            <Progress value={parseProgress} className="h-2" data-testid="progress-parse" />
+            <p className="text-xs text-muted-foreground">
+              Processing large text in chunks for better accuracy
+            </p>
+          </div>
+        )}
+
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div className="flex items-center gap-4 text-sm text-muted-foreground">
             <span data-testid="text-word-count">{wordCount.toLocaleString()} words</span>
@@ -223,7 +255,11 @@ export function TextInput({ value, onChange, onAnalyze, isAnalyzing }: TextInput
               disabled={!value.trim() || isAnalyzing}
               data-testid="button-analyze-text"
             >
-              <Sparkles className="h-4 w-4 mr-2" />
+              {isAnalyzing ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Sparkles className="h-4 w-4 mr-2" />
+              )}
               {isAnalyzing ? "Analyzing..." : "Analyze Text"}
             </Button>
           </div>

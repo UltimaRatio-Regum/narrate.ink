@@ -298,6 +298,76 @@ export async function parseTextWithLLM(
   };
 }
 
+// Streaming version that yields results chunk by chunk
+export interface StreamingParseUpdate {
+  type: 'progress' | 'chunk' | 'complete' | 'error';
+  chunkIndex?: number;
+  totalChunks?: number;
+  segments?: SpeakerSegment[];
+  detectedSpeakers?: string[];
+  error?: string;
+}
+
+export async function* parseTextWithLLMStreaming(
+  text: string,
+  model: string = "meta-llama/llama-3.3-70b-instruct",
+  knownSpeakers: string[] = []
+): AsyncGenerator<StreamingParseUpdate> {
+  if (!isOpenRouterConfigured()) {
+    yield { type: 'error', error: 'OpenRouter is not configured' };
+    return;
+  }
+
+  // Extract potential names from the full text first
+  const potentialNames = extractPotentialNames(text);
+  
+  // Combine known speakers with extracted names (known speakers take priority)
+  const allKnownNames = Array.from(new Set([...knownSpeakers, ...potentialNames]));
+  
+  // Split text into manageable chunks
+  const chunks = splitTextIntoChunks(text, 2000);
+  const totalChunks = chunks.length;
+  
+  // Initial progress update
+  yield { type: 'progress', chunkIndex: 0, totalChunks };
+  
+  const allSpeakers = new Set<string>(knownSpeakers);
+  
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i];
+    
+    try {
+      const result = await parseChunkWithLLM(chunk, model, Array.from(allSpeakers), allKnownNames);
+      result.detectedSpeakers.forEach(s => allSpeakers.add(s));
+      
+      // Yield this chunk's results
+      yield {
+        type: 'chunk',
+        chunkIndex: i + 1,
+        totalChunks,
+        segments: result.segments,
+        detectedSpeakers: Array.from(allSpeakers),
+      };
+    } catch (error) {
+      yield { 
+        type: 'error', 
+        error: error instanceof Error ? error.message : 'Unknown error',
+        chunkIndex: i + 1,
+        totalChunks
+      };
+      return;
+    }
+  }
+  
+  // Final completion update
+  yield { 
+    type: 'complete',
+    chunkIndex: totalChunks,
+    totalChunks,
+    detectedSpeakers: Array.from(allSpeakers)
+  };
+}
+
 export async function getAvailableModels(): Promise<string[]> {
   return [
     "openai/chatgpt-5.2",

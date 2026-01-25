@@ -1,7 +1,8 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { BookAudio, Sparkles, Wand2, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { TextInput } from "@/components/TextInput";
@@ -39,6 +40,13 @@ export default function Home() {
   const [totalSegments, setTotalSegments] = useState(0);
   const [statusMessage, setStatusMessage] = useState("");
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
+
+  // Parse progress state
+  const [parseProgress, setParseProgress] = useState(0);
+  const [parseTotalChunks, setParseTotalChunks] = useState(0);
+  const [parseCurrentChunk, setParseCurrentChunk] = useState(0);
+  const [isParsingStreaming, setIsParsingStreaming] = useState(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Fetch voice samples
   const { data: voiceSamples = [] } = useQuery<VoiceSample[]>({
@@ -180,12 +188,169 @@ export default function Home() {
     },
   });
 
+  // Streaming parse function for LLM mode
+  const parseWithStreaming = useCallback(async (text: string, model?: string, knownSpeakers?: string[]) => {
+    // Cancel any existing parse
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    
+    setIsParsingStreaming(true);
+    setParseProgress(0);
+    setParseCurrentChunk(0);
+    setParseTotalChunks(0);
+    setSegments([]);
+    
+    const accumulatedSpeakers = new Set<string>();
+    
+    try {
+      const response = await fetch('/api/parse-text-llm-stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, model, knownSpeakers }),
+        signal: controller.signal,
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to parse text');
+      }
+      
+      // Check if it's a streaming response or fallback JSON
+      const contentType = response.headers.get('Content-Type') || '';
+      if (!contentType.includes('text/event-stream')) {
+        // Fallback response (non-streaming)
+        const data = await response.json() as ParseTextResponse;
+        setSegments(data.segments);
+        
+        const newConfigs: Record<string, SpeakerConfig> = {};
+        data.detectedSpeakers.forEach((speaker) => {
+          newConfigs[speaker] = {
+            name: speaker,
+            voiceSampleId: null,
+            pitchOffset: 0,
+            speedFactor: 1.0,
+          };
+        });
+        setSpeakerConfigs(newConfigs);
+        setParseProgress(100);
+        
+        toast({
+          title: "Text analyzed (fallback)",
+          description: `Found ${data.segments.length} segments and ${data.detectedSpeakers.length} speakers`,
+        });
+        return;
+      }
+      
+      // Handle SSE stream
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      
+      if (!reader) {
+        throw new Error('No response body');
+      }
+      
+      let buffer = '';
+      
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        
+        buffer += decoder.decode(value, { stream: true });
+        
+        // Process complete SSE messages
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || ''; // Keep incomplete line in buffer
+        
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              
+              if (data.type === 'progress') {
+                setParseTotalChunks(data.totalChunks);
+                setParseCurrentChunk(data.chunkIndex);
+                setParseProgress(0);
+              }
+              
+              if (data.type === 'chunk') {
+                setParseCurrentChunk(data.chunkIndex);
+                const progressPct = Math.round((data.chunkIndex / data.totalChunks) * 100);
+                setParseProgress(progressPct);
+                
+                // Add new segments incrementally
+                setSegments(prev => [...prev, ...data.segments]);
+                
+                // Update detected speakers
+                if (data.detectedSpeakers) {
+                  data.detectedSpeakers.forEach((s: string) => accumulatedSpeakers.add(s));
+                }
+              }
+              
+              if (data.type === 'complete') {
+                setParseProgress(100);
+                
+                // Finalize speaker configs
+                const newConfigs: Record<string, SpeakerConfig> = {};
+                accumulatedSpeakers.forEach((speaker) => {
+                  newConfigs[speaker] = {
+                    name: speaker,
+                    voiceSampleId: null,
+                    pitchOffset: 0,
+                    speedFactor: 1.0,
+                  };
+                });
+                setSpeakerConfigs(newConfigs);
+                
+                toast({
+                  title: "Text analyzed",
+                  description: `Found ${data.totalSegments} segments and ${accumulatedSpeakers.size} speakers`,
+                });
+              }
+              
+              if (data.type === 'error') {
+                throw new Error(data.error);
+              }
+            } catch (parseError) {
+              if (parseError instanceof SyntaxError) {
+                console.warn('Invalid SSE JSON:', line);
+              } else {
+                throw parseError;
+              }
+            }
+          }
+        }
+      }
+    } catch (error) {
+      if ((error as Error).name === 'AbortError') {
+        return; // Cancelled, ignore
+      }
+      toast({
+        title: "Analysis failed",
+        description: (error as Error).message,
+        variant: "destructive",
+      });
+    } finally {
+      setIsParsingStreaming(false);
+      abortControllerRef.current = null;
+    }
+  }, [toast]);
+
   // Handlers
   const handleAnalyze = useCallback((useLLM: boolean, model?: string, knownSpeakers?: string[]) => {
     if (inputText.trim()) {
-      parseTextMutation.mutate({ text: inputText, useLLM, model, knownSpeakers });
+      if (useLLM) {
+        // Use streaming for LLM parsing
+        parseWithStreaming(inputText, model, knownSpeakers);
+      } else {
+        // Use regular mutation for basic parsing
+        parseTextMutation.mutate({ text: inputText, useLLM: false });
+      }
     }
-  }, [inputText, parseTextMutation]);
+  }, [inputText, parseTextMutation, parseWithStreaming]);
 
   const handleUploadVoice = useCallback(async (name: string, file: File) => {
     await uploadVoiceMutation.mutateAsync({ name, file });
@@ -288,7 +453,10 @@ export default function Home() {
               value={inputText}
               onChange={setInputText}
               onAnalyze={handleAnalyze}
-              isAnalyzing={parseTextMutation.isPending}
+              isAnalyzing={parseTextMutation.isPending || isParsingStreaming}
+              parseProgress={parseProgress}
+              parseCurrentChunk={parseCurrentChunk}
+              parseTotalChunks={parseTotalChunks}
             />
             
             {segments.length > 0 && (
