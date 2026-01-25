@@ -44,13 +44,14 @@ class TextParser:
         speaker_history: list[str] = []
         
         current_pos = 0
-        # Match straight quotes, curly double quotes, and curly single quotes
-        quote_pattern = re.compile(r'[""\u201c\u201d]([^""\u201c\u201d]+)[""\u201c\u201d]|[\u2018\u2019\'\u2019]([^\u2018\u2019\'\u2019]+)[\u2018\u2019\'\u2019]')
+        # Match straight quotes, curly double quotes (prioritize double quotes for dialogue)
+        quote_pattern = re.compile(r'["""\u201c\u201d]([^"""\u201c\u201d]+)["""\u201c\u201d]')
         
         for match in quote_pattern.finditer(text):
             quote_start = match.start()
             quote_end = match.end()
-            quote_text = match.group(1)
+            # Get the captured group (quote content without the quote marks)
+            quote_text = match.group(1) if match.group(1) else ""
             
             if quote_start > current_pos:
                 narration_text = text[current_pos:quote_start].strip()

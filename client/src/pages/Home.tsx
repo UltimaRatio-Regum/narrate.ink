@@ -46,12 +46,14 @@ export default function Home() {
   });
 
   // Get detected speakers
-  const detectedSpeakers = [...new Set(segments.filter((s) => s.speaker).map((s) => s.speaker!))];
+  const detectedSpeakers = Array.from(new Set(segments.filter((s) => s.speaker).map((s) => s.speaker!)));
 
-  // Parse text mutation
+  // Parse text mutation (supports both LLM and basic heuristic parsing)
   const parseTextMutation = useMutation({
-    mutationFn: async (text: string) => {
-      const response = await apiRequest("POST", "/api/parse-text", { text });
+    mutationFn: async ({ text, useLLM, model }: { text: string; useLLM: boolean; model?: string }) => {
+      const endpoint = useLLM ? "/api/parse-text-llm" : "/api/parse-text";
+      const body = useLLM ? { text, model } : { text };
+      const response = await apiRequest("POST", endpoint, body);
       return await response.json() as ParseTextResponse;
     },
     onSuccess: (data) => {
@@ -174,9 +176,9 @@ export default function Home() {
   });
 
   // Handlers
-  const handleAnalyze = useCallback(() => {
+  const handleAnalyze = useCallback((useLLM: boolean, model?: string) => {
     if (inputText.trim()) {
-      parseTextMutation.mutate(inputText);
+      parseTextMutation.mutate({ text: inputText, useLLM, model });
     }
   }, [inputText, parseTextMutation]);
 

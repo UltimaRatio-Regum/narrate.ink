@@ -108,6 +108,11 @@ Or use the combined start script:
 
 ## Recent Changes
 
+- **2026-01-25**: Added LLM-powered speaker detection via OpenRouter integration
+  - Users can choose between AI Detection (LLM) and Basic (heuristic) modes
+  - Model selection dropdown with Llama, Mistral, Qwen, DeepSeek options
+  - Automatic fallback to basic parsing if LLM fails
+- **2026-01-25**: Fixed curly/smart quote detection (", ")
 - **2026-01-25**: Improved speaker detection - now checks text after quotes first (e.g., "Hello!" said John)
 - **2026-01-25**: Added smart text chunking with ~30s target and priority-based split points
 - **2026-01-25**: Fixed API response parsing bug in frontend

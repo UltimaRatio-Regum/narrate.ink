@@ -1,18 +1,34 @@
 import { useState, useRef } from "react";
-import { Upload, FileText, Sparkles } from "lucide-react";
+import { Upload, FileText, Sparkles, Brain, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 interface TextInputProps {
   value: string;
   onChange: (text: string) => void;
-  onAnalyze: () => void;
+  onAnalyze: (useLLM: boolean, model?: string) => void;
   isAnalyzing: boolean;
 }
 
+const LLM_MODELS = [
+  { id: "meta-llama/llama-3.3-70b-instruct", name: "Llama 3.3 70B" },
+  { id: "meta-llama/llama-3.1-8b-instruct", name: "Llama 3.1 8B" },
+  { id: "mistralai/mistral-7b-instruct", name: "Mistral 7B" },
+  { id: "qwen/qwen-2.5-72b-instruct", name: "Qwen 2.5 72B" },
+  { id: "deepseek/deepseek-chat", name: "DeepSeek Chat" },
+];
+
 export function TextInput({ value, onChange, onAnalyze, isAnalyzing }: TextInputProps) {
   const [isDragOver, setIsDragOver] = useState(false);
+  const [selectedModel, setSelectedModel] = useState(LLM_MODELS[0]);
+  const [useLLM, setUseLLM] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -46,9 +62,13 @@ export function TextInput({ value, onChange, onAnalyze, isAnalyzing }: TextInput
     onChange(text);
   };
 
+  const handleAnalyze = () => {
+    onAnalyze(useLLM, useLLM ? selectedModel.id : undefined);
+  };
+
   const wordCount = value.trim() ? value.trim().split(/\s+/).length : 0;
   const charCount = value.length;
-  const estimatedDuration = Math.ceil(wordCount / 150); // ~150 words per minute
+  const estimatedDuration = Math.ceil(wordCount / 150);
 
   return (
     <Card className="h-full flex flex-col">
@@ -120,14 +140,49 @@ export function TextInput({ value, onChange, onAnalyze, isAnalyzing }: TextInput
               <span>~{estimatedDuration} min audio</span>
             )}
           </div>
-          <Button 
-            onClick={onAnalyze} 
-            disabled={!value.trim() || isAnalyzing}
-            data-testid="button-analyze-text"
-          >
-            <Sparkles className="h-4 w-4 mr-2" />
-            {isAnalyzing ? "Analyzing..." : "Analyze Text"}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant={useLLM ? "secondary" : "outline"}
+              size="sm"
+              onClick={() => setUseLLM(!useLLM)}
+              className="gap-1"
+              data-testid="button-toggle-llm"
+            >
+              <Brain className="h-4 w-4" />
+              <span className="hidden sm:inline">{useLLM ? "AI Detection" : "Basic"}</span>
+            </Button>
+            
+            {useLLM && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className="gap-1" data-testid="button-select-model">
+                    <span className="max-w-[100px] truncate">{selectedModel.name}</span>
+                    <ChevronDown className="h-3 w-3" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  {LLM_MODELS.map((model) => (
+                    <DropdownMenuItem
+                      key={model.id}
+                      onClick={() => setSelectedModel(model)}
+                      data-testid={`menu-item-model-${model.name.replace(/\s+/g, '-').toLowerCase()}`}
+                    >
+                      {model.name}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+
+            <Button 
+              onClick={handleAnalyze} 
+              disabled={!value.trim() || isAnalyzing}
+              data-testid="button-analyze-text"
+            >
+              <Sparkles className="h-4 w-4 mr-2" />
+              {isAnalyzing ? "Analyzing..." : "Analyze Text"}
+            </Button>
+          </div>
         </div>
       </CardContent>
     </Card>
