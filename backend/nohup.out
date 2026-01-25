@@ -1,0 +1,6 @@
+Chatterbox TTS not available, using synthesized audio
+INFO:     Started server process [2533]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:34466 - "GET /api/health HTTP/1.1" 200 OK

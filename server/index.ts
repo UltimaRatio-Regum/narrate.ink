@@ -2,6 +2,7 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
+import { startPythonBackend } from "./python-backend";
 
 const app = express();
 const httpServer = createServer(app);
@@ -11,16 +12,6 @@ declare module "http" {
     rawBody: unknown;
   }
 }
-
-app.use(
-  express.json({
-    verify: (req, _res, buf) => {
-      req.rawBody = buf;
-    },
-  }),
-);
-
-app.use(express.urlencoded({ extended: false }));
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
@@ -60,7 +51,27 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  // Start Python backend first
+  try {
+    await startPythonBackend();
+    log("Python backend started successfully");
+  } catch (err) {
+    log(`Warning: Python backend failed to start: ${err}`, "python-err");
+    log("Continuing without Python backend...", "express");
+  }
+
+  // Register proxy routes BEFORE body parsers
   await registerRoutes(httpServer, app);
+
+  // Body parsers come AFTER proxy routes to not interfere
+  app.use(
+    express.json({
+      verify: (req, _res, buf) => {
+        req.rawBody = buf;
+      },
+    }),
+  );
+  app.use(express.urlencoded({ extended: false }));
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;

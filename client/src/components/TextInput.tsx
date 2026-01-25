@@ -1,0 +1,135 @@
+import { useState, useRef } from "react";
+import { Upload, FileText, Sparkles } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+
+interface TextInputProps {
+  value: string;
+  onChange: (text: string) => void;
+  onAnalyze: () => void;
+  isAnalyzing: boolean;
+}
+
+export function TextInput({ value, onChange, onAnalyze, isAnalyzing }: TextInputProps) {
+  const [isDragOver, setIsDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(true);
+  };
+
+  const handleDragLeave = () => {
+    setIsDragOver(false);
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+      await readFile(files[0]);
+    }
+  };
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (files && files.length > 0) {
+      await readFile(files[0]);
+    }
+  };
+
+  const readFile = async (file: File) => {
+    const text = await file.text();
+    onChange(text);
+  };
+
+  const wordCount = value.trim() ? value.trim().split(/\s+/).length : 0;
+  const charCount = value.length;
+  const estimatedDuration = Math.ceil(wordCount / 150); // ~150 words per minute
+
+  return (
+    <Card className="h-full flex flex-col">
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div>
+            <CardTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5 text-primary" />
+              Input Text
+            </CardTitle>
+            <CardDescription className="mt-1">
+              Paste your text or upload a file
+            </CardDescription>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".txt,.md,.rtf"
+              className="hidden"
+              onChange={handleFileSelect}
+              data-testid="input-file-upload"
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => fileInputRef.current?.click()}
+              data-testid="button-upload-file"
+            >
+              <Upload className="h-4 w-4 mr-2" />
+              Upload
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="flex-1 flex flex-col gap-4">
+        <div
+          className={`flex-1 relative rounded-md border-2 border-dashed transition-colors ${
+            isDragOver 
+              ? "border-primary bg-primary/5" 
+              : "border-muted-foreground/25"
+          }`}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+        >
+          <Textarea
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder="Paste your story, novel chapter, or any text here. The system will automatically detect dialogue, identify speakers, and apply appropriate emotional prosody..."
+            className="h-full resize-none border-0 focus-visible:ring-0 bg-transparent min-h-[300px]"
+            data-testid="textarea-text-input"
+          />
+          {!value && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-50">
+              <div className="text-center">
+                <Upload className="h-10 w-10 mx-auto mb-2 text-muted-foreground" />
+                <p className="text-sm text-muted-foreground">Drop a text file here</p>
+              </div>
+            </div>
+          )}
+        </div>
+        
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          <div className="flex items-center gap-4 text-sm text-muted-foreground">
+            <span data-testid="text-word-count">{wordCount.toLocaleString()} words</span>
+            <span>{charCount.toLocaleString()} characters</span>
+            {wordCount > 0 && (
+              <span>~{estimatedDuration} min audio</span>
+            )}
+          </div>
+          <Button 
+            onClick={onAnalyze} 
+            disabled={!value.trim() || isAnalyzing}
+            data-testid="button-analyze-text"
+          >
+            <Sparkles className="h-4 w-4 mr-2" />
+            {isAnalyzing ? "Analyzing..." : "Analyze Text"}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
