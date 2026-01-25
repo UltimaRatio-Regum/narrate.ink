@@ -1,0 +1,201 @@
+{
+  "characters": [
+    "Shane Hollander",
+    "Ilya",
+    "Shane's mother (mentioned, not speaking)"
+  ],
+  "chunks": [
+    {
+      "chunk_id": 1,
+      "approx_duration_seconds": 30,
+      "segments": [
+        {
+          "type": "spoken",
+          "text": "“I need to find an apartment in Boston.”",
+          "speaker_candidates": {
+            "Shane Hollander": 0.95,
+            "Ilya": 0.05
+          }
+        },
+        {
+          "type": "narration",
+          "text": "Ilya glanced up at him, blinking sleepily. Shane tried not to stare, but it was difficult. Ilya sprawled over the bed, nestled between pillows and blankets..."
+        },
+        {
+          "type": "spoken",
+          "text": "“You are thinking ahead again, I see.”",
+          "speaker_candidates": {
+            "Ilya": 0.97,
+            "Shane Hollander": 0.03
+          }
+        }
+      ]
+    },
+    {
+      "chunk_id": 2,
+      "approx_duration_seconds": 30,
+      "segments": [
+        {
+          "type": "spoken",
+          "text": "“No, not really,”",
+          "speaker_candidates": {
+            "Shane Hollander": 0.98,
+            "Ilya": 0.02
+          }
+        },
+        {
+          "type": "narration",
+          "text": "Shane said, tapping anxiously on the trackpad. His email was open to a new message from his mother, and he had several tabs open researching the Boston real estate market."
+        }
+      ]
+    },
+    {
+      "chunk_id": 3,
+      "approx_duration_seconds": 30,
+      "segments": [
+        {
+          "type": "narration",
+          "text": "It had been a week since Shane received the call confirming that the Montreal Voyageurs had traded him to the Boston Bears... Montreal no longer wanted him, so they discarded him."
+        }
+      ]
+    },
+    {
+      "chunk_id": 4,
+      "approx_duration_seconds": 30,
+      "segments": [
+        {
+          "type": "narration",
+          "text": "It had only been a week, but Shane already felt as if he was behind on a quickly encroaching deadline... He thought he would have broken down."
+        },
+        {
+          "type": "spoken",
+          "text": "“Preseason starts in September, and I’ll want to be there for the whole time, since I’m a new player on the team.”",
+          "speaker_candidates": {
+            "Shane Hollander": 0.96,
+            "Ilya": 0.04
+          }
+        }
+      ]
+    },
+    {
+      "chunk_id": 5,
+      "approx_duration_seconds": 30,
+      "segments": [
+        {
+          "type": "narration",
+          "text": "Just a week. A week of torrential emotional whiplash... The feeling of abandonment that sat heavy in his chest might have been ridiculous, but it was very much real."
+        },
+        {
+          "type": "spoken",
+          "text": "“So unnecessary,”",
+          "speaker_candidates": {
+            "Ilya": 0.94,
+            "Shane Hollander": 0.06
+          }
+        },
+        {
+          "type": "spoken",
+          "text": "“You are Stanley Cup winner! Skip the extra days.”",
+          "speaker_candidates": {
+            "Ilya": 0.98,
+            "Shane Hollander": 0.02
+          }
+        }
+      ]
+    },
+    {
+      "chunk_id": 6,
+      "approx_duration_seconds": 30,
+      "segments": [
+        {
+          "type": "spoken",
+          "text": "“No,”",
+          "speaker_candidates": {
+            "Shane Hollander": 0.97,
+            "Ilya": 0.03
+          }
+        },
+        {
+          "type": "narration",
+          "text": "Shane said, trying to push through his inner turmoil. He had to focus... outing Shane to his family, his friends, and every player in the league."
+        }
+      ]
+    },
+    {
+      "chunk_id": 7,
+      "approx_duration_seconds": 30,
+      "segments": [
+        {
+          "type": "spoken",
+          "text": "“I’ll want to be moved in before we start. Which means I have, like, six weeks to find a real estate agent... I hate renting... I’d rather buy something...”",
+          "speaker_candidates": {
+            "Shane Hollander": 0.99,
+            "Ilya": 0.01
+          }
+        },
+        {
+          "type": "narration",
+          "text": "He sighed, clicking between the tabs for two different developers, scanning their agent biographies."
+        }
+      ]
+    },
+    {
+      "chunk_id": 8,
+      "approx_duration_seconds": 30,
+      "segments": [
+        {
+          "type": "spoken",
+          "text": "“That’s, like, two weeks to find a place. A month, max. I need to get a move on... My mom’s also working on it...”",
+          "speaker_candidates": {
+            "Shane Hollander": 0.98,
+            "Ilya": 0.02
+          }
+        }
+      ]
+    },
+    {
+      "chunk_id": 9,
+      "approx_duration_seconds": 30,
+      "segments": [
+        {
+          "type": "spoken",
+          "text": "“I will help,”",
+          "speaker_candidates": {
+            "Ilya": 0.97,
+            "Shane Hollander": 0.03
+          }
+        },
+        {
+          "type": "narration",
+          "text": "Ilya sighed, leaning over to kiss Shane’s waist. He dragged his hand up his thigh..."
+        },
+        {
+          "type": "spoken",
+          "text": "“You like my house, don’t you?”",
+          "speaker_candidates": {
+            "Ilya": 0.96,
+            "Shane Hollander": 0.04
+          }
+        }
+      ]
+    },
+    {
+      "chunk_id": 10,
+      "approx_duration_seconds": 30,
+      "segments": [
+        {
+          "type": "narration",
+          "text": "Shane glanced at him. He looked back at his computer. Focus, he told himself."
+        },
+        {
+          "type": "spoken",
+          "text": "“Yes. But I don’t have time to have anything built-”",
+          "speaker_candidates": {
+            "Shane Hollander": 0.97,
+            "Ilya": 0.03
+          }
+        }
+      ]
+    }
+  ]
+}
