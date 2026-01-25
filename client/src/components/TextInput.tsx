@@ -28,7 +28,9 @@ interface TextInputProps {
 }
 
 const LLM_MODELS = [
-  { id: "openai/chatgpt-5.2", name: "ChatGPT 5.2" },
+  { id: "openai/chatgpt-4o-latest", name: "ChatGPT 4o" },
+  { id: "openai/gpt-4o", name: "GPT-4o" },
+  { id: "openai/gpt-4o-mini", name: "GPT-4o Mini" },
   { id: "meta-llama/llama-3.3-70b-instruct", name: "Llama 3.3 70B" },
   { id: "meta-llama/llama-3.1-8b-instruct", name: "Llama 3.1 8B" },
   { id: "mistralai/mistral-7b-instruct", name: "Mistral 7B" },

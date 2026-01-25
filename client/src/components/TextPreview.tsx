@@ -1,13 +1,38 @@
-import { BookOpen, Quote, User } from "lucide-react";
+import { BookOpen, Quote, User, AlertTriangle, Users } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { TextSegment } from "@shared/schema";
 
 interface TextPreviewProps {
   segments: TextSegment[];
   selectedSegmentId: string | null;
   onSelectSegment: (id: string) => void;
+}
+
+function SpeakerConfidenceTooltip({ candidates }: { candidates: Record<string, number> }) {
+  const entries = Object.entries(candidates).sort((a, b) => b[1] - a[1]);
+  
+  return (
+    <div className="space-y-1">
+      <p className="font-medium text-xs mb-2">Speaker Confidence</p>
+      {entries.map(([speaker, confidence]) => (
+        <div key={speaker} className="flex items-center justify-between gap-3 text-xs">
+          <span>{speaker}</span>
+          <div className="flex items-center gap-1">
+            <div className="w-16 h-1.5 bg-muted rounded-full overflow-hidden">
+              <div 
+                className="h-full bg-primary transition-all" 
+                style={{ width: `${confidence * 100}%` }}
+              />
+            </div>
+            <span className="text-muted-foreground w-8">{Math.round(confidence * 100)}%</span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 const sentimentColors: Record<string, string> = {
@@ -27,6 +52,7 @@ export function TextPreview({
 }: TextPreviewProps) {
   const dialogueCount = segments.filter((s) => s.type === "dialogue").length;
   const narrationCount = segments.filter((s) => s.type === "narration").length;
+  const reviewCount = segments.filter((s) => s.needsReview).length;
   const speakers = [...new Set(segments.filter((s) => s.speaker).map((s) => s.speaker))];
 
   return (
@@ -43,7 +69,7 @@ export function TextPreview({
             </CardDescription>
           </div>
           {segments.length > 0 && (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <Badge variant="secondary" className="border">
                 <Quote className="h-3 w-3 mr-1" />
                 {dialogueCount} dialogue
@@ -52,6 +78,12 @@ export function TextPreview({
                 <BookOpen className="h-3 w-3 mr-1" />
                 {narrationCount} narration
               </Badge>
+              {reviewCount > 0 && (
+                <Badge variant="outline" className="border-amber-500/50 bg-amber-500/10 text-amber-700 dark:text-amber-400">
+                  <AlertTriangle className="h-3 w-3 mr-1" />
+                  {reviewCount} need review
+                </Badge>
+              )}
             </div>
           )}
         </div>
@@ -91,10 +123,32 @@ export function TextPreview({
                       )}
                       {segment.type}
                     </Badge>
-                    {segment.speaker && (
+                    {segment.speaker && segment.speakerCandidates && Object.keys(segment.speakerCandidates).length > 1 ? (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Badge 
+                            variant="secondary" 
+                            className={`text-xs cursor-help ${segment.needsReview ? "border-amber-500/50 bg-amber-500/10" : ""}`}
+                          >
+                            <User className="h-3 w-3 mr-1" />
+                            {segment.speaker}
+                            {segment.needsReview && <AlertTriangle className="h-3 w-3 ml-1 text-amber-600" />}
+                          </Badge>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-xs">
+                          <SpeakerConfidenceTooltip candidates={segment.speakerCandidates} />
+                        </TooltipContent>
+                      </Tooltip>
+                    ) : segment.speaker ? (
                       <Badge variant="secondary" className="text-xs">
                         <User className="h-3 w-3 mr-1" />
                         {segment.speaker}
+                      </Badge>
+                    ) : null}
+                    {segment.needsReview && !segment.speaker && (
+                      <Badge variant="outline" className="text-xs border-amber-500/50 bg-amber-500/10 text-amber-700 dark:text-amber-400">
+                        <AlertTriangle className="h-3 w-3 mr-1" />
+                        needs review
                       </Badge>
                     )}
                     {segment.sentiment && (
@@ -107,6 +161,11 @@ export function TextPreview({
                           {Math.round(segment.sentiment.score * 100)}%
                         </span>
                       </Badge>
+                    )}
+                    {segment.chunkId && (
+                      <span className="text-xs text-muted-foreground">
+                        ~{segment.approxDurationSeconds || 30}s
+                      </span>
                     )}
                     <span className="text-xs text-muted-foreground ml-auto">
                       #{index + 1}

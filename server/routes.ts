@@ -53,7 +53,7 @@ export async function registerRoutes(
         const speakers = Array.isArray(knownSpeakers) ? knownSpeakers : [];
         const result = await parseTextWithLLM(text, model, speakers);
         
-        // Calculate proper text positions and add sentiment placeholders
+        // Calculate proper text positions and include all new fields
         let currentPos = 0;
         const segments = result.segments.map((seg, index) => {
           const segmentText = seg.text;
@@ -67,9 +67,13 @@ export async function registerRoutes(
             type: seg.type,
             text: segmentText,
             speaker: seg.speaker,
-            sentiment: { label: "neutral" as const, score: 0.5 },
+            speakerCandidates: seg.speakerCandidates,
+            needsReview: seg.needsReview,
+            sentiment: seg.sentiment || { label: "neutral" as const, score: 0.5 },
             startIndex,
             endIndex,
+            chunkId: seg.chunkId,
+            approxDurationSeconds: seg.approxDurationSeconds,
           };
         });
 
@@ -149,7 +153,7 @@ export async function registerRoutes(
         }
         
         if (update.type === 'chunk' && update.segments) {
-          // Process segments with proper positions
+          // Process segments with proper positions and all new fields
           const processedSegments = update.segments.map((seg, index) => {
             const segmentText = seg.text;
             const startIdx = text.indexOf(segmentText, currentPos);
@@ -162,9 +166,13 @@ export async function registerRoutes(
               type: seg.type,
               text: segmentText,
               speaker: seg.speaker,
-              sentiment: { label: "neutral" as const, score: 0.5 },
+              speakerCandidates: seg.speakerCandidates,
+              needsReview: seg.needsReview,
+              sentiment: seg.sentiment || { label: "neutral" as const, score: 0.5 },
               startIndex,
               endIndex,
+              chunkId: seg.chunkId,
+              approxDurationSeconds: seg.approxDurationSeconds,
             };
           });
           

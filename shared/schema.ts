@@ -26,15 +26,23 @@ export const sentimentSchema = z.object({
 
 export type Sentiment = z.infer<typeof sentimentSchema>;
 
+// Speaker confidence scores for dialogue segments
+export const speakerCandidatesSchema = z.record(z.string(), z.number().min(0).max(1));
+export type SpeakerCandidates = z.infer<typeof speakerCandidatesSchema>;
+
 // Text segment after parsing
 export const textSegmentSchema = z.object({
   id: z.string(),
   type: segmentTypeEnum,
   text: z.string(),
   speaker: z.string().nullable(),
+  speakerCandidates: speakerCandidatesSchema.nullable(), // Confidence scores for each potential speaker
+  needsReview: z.boolean().default(false), // True if low variance between speaker candidates
   sentiment: sentimentSchema.nullable(),
   startIndex: z.number(),
   endIndex: z.number(),
+  chunkId: z.number().optional(), // For grouping into ~30s chunks
+  approxDurationSeconds: z.number().optional(), // Estimated audio duration
 });
 
 export type TextSegment = z.infer<typeof textSegmentSchema>;

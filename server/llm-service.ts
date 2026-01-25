@@ -12,10 +12,43 @@ const openrouter = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENROUTER_API_KEY,
 });
 
+// Default to ChatGPT
+export const DEFAULT_MODEL = "openai/chatgpt-4o-latest";
+
+export interface SpeakerCandidates {
+  [speaker: string]: number; // name -> confidence 0-1
+}
+
+export interface LLMSegment {
+  type: "spoken" | "narration";
+  text: string;
+  speaker_candidates?: SpeakerCandidates;
+  sentiment?: {
+    label: string;
+    score: number;
+  };
+}
+
+export interface LLMChunk {
+  chunk_id: number;
+  approx_duration_seconds: number;
+  segments: LLMSegment[];
+}
+
+export interface LLMParseResult {
+  characters: string[];
+  chunks: LLMChunk[];
+}
+
 export interface SpeakerSegment {
   text: string;
   type: "dialogue" | "narration";
   speaker: string | null;
+  speakerCandidates: SpeakerCandidates | null;
+  needsReview: boolean;
+  sentiment: { label: string; score: number } | null;
+  chunkId: number;
+  approxDurationSeconds: number;
 }
 
 export interface ParsedTextResult {
@@ -23,282 +56,210 @@ export interface ParsedTextResult {
   detectedSpeakers: string[];
 }
 
-// Common words that look like names but aren't (expanded list)
-const NON_NAME_WORDS = new Set([
-  // Pronouns and articles
-  "I", "A", "The", "It", "He", "She", "They", "We", "You", "My", "Your", "His", "Her",
-  "Their", "Our", "This", "That", "These", "Those", "What", "Where", "When", "Why",
-  "How", "Who", "Which", "Its", "One", "Some", "Any", "Each", "Every", "All", "Both",
-  // Conjunctions and prepositions
-  "If", "But", "And", "Or", "So", "Yet", "For", "Nor", "As", "At", "By", "In", "On",
-  "To", "Up", "Of", "With", "From", "Into", "Over", "Under", "After", "Before",
-  // Common words often capitalized
-  "Oh", "Ah", "Yes", "No", "Well", "Now", "Then", "Here", "There", "Today",
-  "Tomorrow", "Yesterday", "Perhaps", "Maybe", "Please", "Thanks", "Sorry",
-  // Days and months
-  "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday",
-  "January", "February", "March", "April", "May", "June", "July", "August",
-  "September", "October", "November", "December",
-  // Titles
-  "Mr", "Mrs", "Ms", "Dr", "Prof", "Sir", "Lord", "Lady", "Captain", "General",
-  "Colonel", "King", "Queen", "Prince", "Princess", "Duke", "Duchess", "Earl",
-  // Document structure
-  "Chapter", "Part", "Book", "Volume", "Section", "Page", "Note", "Figure",
-  "Table", "Appendix", "Index", "Prologue", "Epilogue", "Introduction",
-  // Common nouns often capitalized in fiction
-  "Father", "Mother", "Brother", "Sister", "Uncle", "Aunt", "Grandmother",
-  "Grandfather", "God", "Heaven", "Hell", "Earth", "World", "Universe",
-  // Places and concepts
-  "North", "South", "East", "West", "City", "Town", "Country", "State",
-  "Street", "Avenue", "Road", "Building", "House", "Room", "Door", "Window",
-]);
-
-// Extract potential character names from text using proper noun detection
-export function extractPotentialNames(text: string): string[] {
-  const names = new Set<string>();
+// Check if speaker confidence has low variance (needs manual review)
+function needsReview(candidates: SpeakerCandidates | undefined): boolean {
+  if (!candidates) return false;
+  const scores = Object.values(candidates);
+  if (scores.length < 2) return false;
   
-  // Pattern for capitalized words that might be names
-  // Look for: word starting with capital followed by lowercase, not at sentence start
-  const patterns = [
-    // Names after dialogue verbs: said John, replied Mary
-    /(?:said|asked|replied|answered|whispered|shouted|exclaimed|murmured|muttered|called|cried|yelled|screamed|announced|declared|demanded|insisted|suggested|wondered|thought|mused)\s+([A-Z][a-z]+)/gi,
-    // Names before dialogue verbs: John said, Mary replied
-    /([A-Z][a-z]+)\s+(?:said|asked|replied|answered|whispered|shouted|exclaimed|murmured|muttered|called|cried|yelled|screamed|announced|declared|demanded|insisted|suggested|wondered|thought|mused)/gi,
-    // Names after pronouns indicating action: "Hello," John said
-    /["""][^"""]+["""]\s+([A-Z][a-z]+)\s+/g,
-    // Two capitalized words together (first + last name): John Smith, Mary Jane
-    /\b([A-Z][a-z]+)\s+([A-Z][a-z]+)\b/g,
-    // Standalone capitalized words mid-sentence (after lowercase word)
-    /[a-z.,!?]\s+([A-Z][a-z]{2,})\b/g,
-  ];
+  // Sort descending
+  scores.sort((a, b) => b - a);
+  const topScore = scores[0];
+  const secondScore = scores[1];
+  
+  // If difference between top two is less than 0.3, needs review
+  return (topScore - secondScore) < 0.3;
+}
 
-  for (const pattern of patterns) {
-    let match;
-    while ((match = pattern.exec(text)) !== null) {
-      // Handle single or multiple capture groups
-      for (let i = 1; i < match.length; i++) {
-        const name = match[i];
-        if (name && name.length >= 2 && !NON_NAME_WORDS.has(name)) {
-          names.add(name);
+// Get the most likely speaker from candidates
+function getMostLikelySpeaker(candidates: SpeakerCandidates | undefined): string | null {
+  if (!candidates) return null;
+  const entries = Object.entries(candidates);
+  if (entries.length === 0) return null;
+  
+  entries.sort((a, b) => b[1] - a[1]);
+  return entries[0][0];
+}
+
+// Convert LLM result to our segment format
+function convertLLMResult(result: LLMParseResult): ParsedTextResult {
+  const segments: SpeakerSegment[] = [];
+  
+  for (const chunk of result.chunks) {
+    for (const seg of chunk.segments) {
+      const isSpoken = seg.type === "spoken";
+      const candidates = isSpoken ? seg.speaker_candidates : null;
+      
+      segments.push({
+        text: seg.text,
+        type: isSpoken ? "dialogue" : "narration",
+        speaker: isSpoken ? getMostLikelySpeaker(candidates ?? undefined) : null,
+        speakerCandidates: candidates ?? null,
+        needsReview: needsReview(candidates ?? undefined),
+        sentiment: seg.sentiment ?? null,
+        chunkId: chunk.chunk_id,
+        approxDurationSeconds: chunk.approx_duration_seconds,
+      });
+    }
+  }
+  
+  return {
+    segments,
+    detectedSpeakers: result.characters || [],
+  };
+}
+
+// Split text into ~10 paragraph batches for conversation context
+function splitIntoParagraphBatches(text: string, paragraphsPerBatch: number = 10): string[] {
+  // Split by double newlines (paragraphs)
+  const paragraphs = text.split(/\n\n+/).filter(p => p.trim().length > 0);
+  
+  const batches: string[] = [];
+  for (let i = 0; i < paragraphs.length; i += paragraphsPerBatch) {
+    const batch = paragraphs.slice(i, i + paragraphsPerBatch).join("\n\n");
+    batches.push(batch);
+  }
+  
+  return batches.length > 0 ? batches : [text];
+}
+
+const SYSTEM_PROMPT = `You are an expert text analyzer for audiobook production. Your task is to parse narrative text into structured chunks suitable for audio generation.
+
+Rules for chunking and segmentation:
+1. Split text at natural stopping points into chunks of approximately 30 seconds of audio (roughly 75-100 words per chunk)
+2. Each chunk should contain segments that are EITHER all narration OR a single speaker's dialogue
+3. ALWAYS split at transitions between speaking and narrating
+4. Text within quotation marks (straight " or curly "") is spoken dialogue
+5. Text outside quotes is narration
+
+For each spoken segment:
+- Identify the speaker from context clues (dialogue tags like "said John", or contextual inference)
+- Provide confidence scores for each possible speaker (values 0-1, must sum to 1)
+- Include sentiment analysis (positive, negative, neutral, excited, sad, angry, fearful)
+
+Return JSON in this exact format:
+{
+  "characters": ["Character Name 1", "Character Name 2"],
+  "chunks": [
+    {
+      "chunk_id": 1,
+      "approx_duration_seconds": 30,
+      "segments": [
+        {
+          "type": "spoken",
+          "text": "The exact quoted text including quotes",
+          "speaker_candidates": {"CharacterA": 0.9, "CharacterB": 0.1},
+          "sentiment": {"label": "neutral", "score": 0.8}
+        },
+        {
+          "type": "narration", 
+          "text": "The narration text",
+          "sentiment": {"label": "neutral", "score": 0.7}
+        }
+      ]
+    }
+  ]
+}
+
+Important:
+- Preserve the EXACT text including quotation marks
+- Include ALL text with no gaps
+- Chunk IDs should be sequential starting from the provided starting ID
+- Use context from previous exchanges to identify speakers consistently`;
+
+// Parse text using conversational approach (maintaining context across batches)
+async function parseWithConversation(
+  text: string,
+  model: string,
+  knownSpeakers: string[]
+): Promise<LLMParseResult> {
+  const batches = splitIntoParagraphBatches(text, 10);
+  const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+    { role: "system", content: SYSTEM_PROMPT }
+  ];
+  
+  // Add known speakers hint if provided
+  if (knownSpeakers.length > 0) {
+    messages.push({
+      role: "user",
+      content: `Known characters in this text: ${knownSpeakers.join(", ")}. Please use these names when identifying speakers.`
+    });
+    messages.push({
+      role: "assistant",
+      content: `Understood. I'll identify speakers using these character names: ${knownSpeakers.join(", ")}.`
+    });
+  }
+  
+  const allCharacters = new Set<string>(knownSpeakers);
+  const allChunks: LLMChunk[] = [];
+  let nextChunkId = 1;
+  
+  for (let i = 0; i < batches.length; i++) {
+    const batch = batches[i];
+    const isFirst = i === 0;
+    const isLast = i === batches.length - 1;
+    
+    const userPrompt = isFirst
+      ? `Parse the following text into chunks and segments. Start chunk IDs at ${nextChunkId}.\n\nHere is the text:\n\n${batch}`
+      : `Continue parsing the next section. Continue chunk IDs from ${nextChunkId}. Use the same characters identified so far.\n\nHere is the text:\n\n${batch}`;
+    
+    messages.push({ role: "user", content: userPrompt });
+    
+    const response = await openrouter.chat.completions.create({
+      model,
+      messages,
+      max_tokens: 8192,
+      temperature: 0.1,
+      response_format: { type: "json_object" },
+    });
+    
+    const content = response.choices[0]?.message?.content;
+    if (!content) {
+      throw new Error(`No response from LLM for batch ${i + 1}`);
+    }
+    
+    // Add assistant response to conversation history
+    messages.push({ role: "assistant", content });
+    
+    // Parse the response
+    const parsed = JSON.parse(content) as LLMParseResult;
+    
+    // Collect characters
+    if (parsed.characters) {
+      parsed.characters.forEach(c => allCharacters.add(c));
+    }
+    
+    // Collect chunks and update next chunk ID
+    if (parsed.chunks && Array.isArray(parsed.chunks)) {
+      for (const chunk of parsed.chunks) {
+        allChunks.push(chunk);
+        if (chunk.chunk_id >= nextChunkId) {
+          nextChunkId = chunk.chunk_id + 1;
         }
       }
     }
   }
-
-  return Array.from(names);
-}
-
-// Check if a position is inside an open quote (from startPos to position)
-// Supports double quotes (straight and curly) and single quotes
-function isInsideQuote(text: string, startPos: number, position: number): boolean {
-  let doubleQuoteCount = 0;
-  let singleQuoteCount = 0;
   
-  for (let i = startPos; i < position && i < text.length; i++) {
-    const char = text[i];
-    // Handle straight and curly double quotes
-    if (char === '"' || char === '\u201c' || char === '\u201d') {
-      doubleQuoteCount++;
-    }
-    // Handle straight and curly single quotes (apostrophe-like)
-    if (char === "'" || char === '\u2018' || char === '\u2019') {
-      // Only count as dialogue quote if not preceded by a letter (avoids contractions like "don't")
-      if (i === startPos || !/[a-zA-Z]/.test(text[i - 1])) {
-        singleQuoteCount++;
-      }
-    }
-  }
-  
-  // Inside quote if either type has odd count
-  return doubleQuoteCount % 2 === 1 || singleQuoteCount % 2 === 1;
-}
-
-// Find a safe split point that doesn't break quotes
-function findSafeSplitPoint(text: string, startPos: number, targetEnd: number): number {
-  const minPos = startPos + Math.floor((targetEnd - startPos) * 0.3);
-  
-  // Look for paragraph break first (safest)
-  for (let i = targetEnd; i >= minPos; i--) {
-    if (i > 0 && text[i - 1] === '\n' && text[i] === '\n') {
-      if (!isInsideQuote(text, startPos, i)) {
-        return Math.min(i + 1, targetEnd); // Split after the double newline
-      }
-    }
-  }
-  
-  // Look for sentence end outside quotes (split after the punctuation)
-  for (let i = targetEnd - 1; i >= minPos; i--) {
-    const char = text[i];
-    if ((char === '.' || char === '!' || char === '?') && 
-        !isInsideQuote(text, startPos, i + 1)) {
-      // Find end of whitespace after punctuation
-      let splitPos = i + 1;
-      while (splitPos < targetEnd && /\s/.test(text[splitPos])) {
-        splitPos++;
-      }
-      return Math.min(splitPos, targetEnd);
-    }
-  }
-  
-  // Fallback: find any whitespace outside quotes
-  for (let i = targetEnd - 1; i >= minPos; i--) {
-    if (/\s/.test(text[i]) && !isInsideQuote(text, startPos, i)) {
-      return i + 1;
-    }
-  }
-  
-  // Last resort: split at target end (may break quote, but LLM can handle it)
-  return targetEnd;
-}
-
-// Split text into chunks at natural boundaries, avoiding quote splits
-export function splitTextIntoChunks(text: string, maxChunkSize: number = 2000): string[] {
-  if (text.length <= maxChunkSize) {
-    return [text];
-  }
-
-  const chunks: string[] = [];
-  let startPos = 0;
-  
-  while (startPos < text.length) {
-    // If remaining text fits in one chunk, add it
-    if (text.length - startPos <= maxChunkSize) {
-      chunks.push(text.slice(startPos));
-      break;
-    }
-    
-    // Find safe split point (constrained to current chunk window)
-    const targetEnd = Math.min(startPos + maxChunkSize, text.length);
-    let splitPoint = findSafeSplitPoint(text, startPos, targetEnd);
-    
-    // Ensure we make progress (avoid infinite loop)
-    if (splitPoint <= startPos) {
-      splitPoint = targetEnd;
-    }
-    
-    // Extract chunk (preserve all text including whitespace)
-    const chunk = text.slice(startPos, splitPoint);
-    if (chunk.length > 0) {
-      chunks.push(chunk);
-    }
-    
-    // Move to next position (don't skip any characters)
-    startPos = splitPoint;
-  }
-  
-  return chunks;
-}
-
-// Parse a single chunk with the LLM
-async function parseChunkWithLLM(
-  text: string,
-  model: string,
-  knownSpeakers: string[],
-  potentialNames: string[]
-): Promise<ParsedTextResult> {
-  const speakerHint = knownSpeakers.length > 0 
-    ? `\n\nKnown speakers in this text: ${knownSpeakers.join(", ")}`
-    : "";
-  
-  const nameHint = potentialNames.length > 0 
-    ? `\n\nPotential character names detected: ${potentialNames.join(", ")}`
-    : "";
-
-  const systemPrompt = `You are an expert text analyzer for audiobook production. Your task is to parse narrative text and identify:
-1. Dialogue sections (text within quotes that is spoken by a character)
-2. Narration sections (descriptive text not spoken by characters)
-3. The speaker of each dialogue section
-
-Rules:
-- Dialogue is ONLY text within quotation marks (straight " or curly "")
-- The speaker is typically mentioned before or after the dialogue (e.g., "Hello," said John)
-- If no speaker is clearly identified, use null
-- Preserve the exact text content including quotes
-- Include ALL text - both dialogue and narration${speakerHint}${nameHint}
-
-Return a JSON object with this structure:
-{
-  "segments": [
-    {"text": "exact text content", "type": "dialogue" or "narration", "speaker": "Name" or null}
-  ],
-  "detectedSpeakers": ["list of all unique speaker names found"]
-}
-
-Important: The segments should cover the ENTIRE input text in order, with no gaps or overlaps.`;
-
-  const userPrompt = `Parse the following text into dialogue and narration segments, identifying speakers:
-
-${text}`;
-
-  const response = await openrouter.chat.completions.create({
-    model,
-    messages: [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userPrompt },
-    ],
-    max_tokens: 8192,
-    temperature: 0.1,
-    response_format: { type: "json_object" },
-  });
-
-  const content = response.choices[0]?.message?.content;
-  if (!content) {
-    throw new Error("No response from LLM");
-  }
-
-  const parsed = JSON.parse(content) as ParsedTextResult;
-  
-  if (!Array.isArray(parsed.segments)) {
-    throw new Error("Invalid response format: segments not an array");
-  }
-  
-  if (!Array.isArray(parsed.detectedSpeakers)) {
-    parsed.detectedSpeakers = [];
-  }
-
-  return parsed;
+  return {
+    characters: Array.from(allCharacters),
+    chunks: allChunks,
+  };
 }
 
 export async function parseTextWithLLM(
   text: string,
-  model: string = "meta-llama/llama-3.3-70b-instruct",
+  model: string = DEFAULT_MODEL,
   knownSpeakers: string[] = []
 ): Promise<ParsedTextResult> {
   if (!isOpenRouterConfigured()) {
     throw new Error("OpenRouter is not configured");
   }
-
-  // Extract potential names from the full text first
-  const potentialNames = extractPotentialNames(text);
   
-  // Combine known speakers with extracted names (known speakers take priority)
-  const allKnownNames = Array.from(new Set([...knownSpeakers, ...potentialNames]));
-  
-  // Split text into manageable chunks
-  const chunks = splitTextIntoChunks(text, 2000);
-  
-  // If only one chunk, parse directly
-  if (chunks.length === 1) {
-    return parseChunkWithLLM(text, model, knownSpeakers, potentialNames);
-  }
-  
-  // Parse each chunk and merge results
-  const allSegments: SpeakerSegment[] = [];
-  const allSpeakers = new Set<string>(knownSpeakers);
-  
-  for (const chunk of chunks) {
-    const result = await parseChunkWithLLM(chunk, model, Array.from(allSpeakers), allKnownNames);
-    allSegments.push(...result.segments);
-    result.detectedSpeakers.forEach(s => allSpeakers.add(s));
-  }
-
-  return {
-    segments: allSegments,
-    detectedSpeakers: Array.from(allSpeakers),
-  };
+  const result = await parseWithConversation(text, model, knownSpeakers);
+  return convertLLMResult(result);
 }
 
-// Streaming version that yields results chunk by chunk
+// Streaming version that yields results batch by batch
 export interface StreamingParseUpdate {
   type: 'progress' | 'chunk' | 'complete' | 'error';
   chunkIndex?: number;
@@ -310,7 +271,7 @@ export interface StreamingParseUpdate {
 
 export async function* parseTextWithLLMStreaming(
   text: string,
-  model: string = "meta-llama/llama-3.3-70b-instruct",
+  model: string = DEFAULT_MODEL,
   knownSpeakers: string[] = []
 ): AsyncGenerator<StreamingParseUpdate> {
   if (!isOpenRouterConfigured()) {
@@ -318,42 +279,107 @@ export async function* parseTextWithLLMStreaming(
     return;
   }
 
-  // Extract potential names from the full text first
-  const potentialNames = extractPotentialNames(text);
-  
-  // Combine known speakers with extracted names (known speakers take priority)
-  const allKnownNames = Array.from(new Set([...knownSpeakers, ...potentialNames]));
-  
-  // Split text into manageable chunks
-  const chunks = splitTextIntoChunks(text, 2000);
-  const totalChunks = chunks.length;
+  const batches = splitIntoParagraphBatches(text, 10);
+  const totalBatches = batches.length;
   
   // Initial progress update
-  yield { type: 'progress', chunkIndex: 0, totalChunks };
+  yield { type: 'progress', chunkIndex: 0, totalChunks: totalBatches };
   
-  const allSpeakers = new Set<string>(knownSpeakers);
+  const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+    { role: "system", content: SYSTEM_PROMPT }
+  ];
   
-  for (let i = 0; i < chunks.length; i++) {
-    const chunk = chunks[i];
+  // Add known speakers hint if provided
+  if (knownSpeakers.length > 0) {
+    messages.push({
+      role: "user",
+      content: `Known characters in this text: ${knownSpeakers.join(", ")}. Please use these names when identifying speakers.`
+    });
+    messages.push({
+      role: "assistant",
+      content: `Understood. I'll identify speakers using these character names: ${knownSpeakers.join(", ")}.`
+    });
+  }
+  
+  const allCharacters = new Set<string>(knownSpeakers);
+  let nextChunkId = 1;
+  
+  for (let i = 0; i < batches.length; i++) {
+    const batch = batches[i];
+    const isFirst = i === 0;
+    
+    const userPrompt = isFirst
+      ? `Parse the following text into chunks and segments. Start chunk IDs at ${nextChunkId}.\n\nHere is the text:\n\n${batch}`
+      : `Continue parsing the next section. Continue chunk IDs from ${nextChunkId}. Use the same characters identified so far.\n\nHere is the text:\n\n${batch}`;
+    
+    messages.push({ role: "user", content: userPrompt });
     
     try {
-      const result = await parseChunkWithLLM(chunk, model, Array.from(allSpeakers), allKnownNames);
-      result.detectedSpeakers.forEach(s => allSpeakers.add(s));
+      const response = await openrouter.chat.completions.create({
+        model,
+        messages,
+        max_tokens: 8192,
+        temperature: 0.1,
+        response_format: { type: "json_object" },
+      });
       
-      // Yield this chunk's results
+      const content = response.choices[0]?.message?.content;
+      if (!content) {
+        throw new Error(`No response from LLM for batch ${i + 1}`);
+      }
+      
+      // Add assistant response to conversation history for context
+      messages.push({ role: "assistant", content });
+      
+      // Parse the response
+      const parsed = JSON.parse(content) as LLMParseResult;
+      
+      // Collect characters
+      if (parsed.characters) {
+        parsed.characters.forEach(c => allCharacters.add(c));
+      }
+      
+      // Convert to our segment format
+      const batchSegments: SpeakerSegment[] = [];
+      if (parsed.chunks && Array.isArray(parsed.chunks)) {
+        for (const chunk of parsed.chunks) {
+          if (chunk.chunk_id >= nextChunkId) {
+            nextChunkId = chunk.chunk_id + 1;
+          }
+          
+          for (const seg of chunk.segments) {
+            const isSpoken = seg.type === "spoken";
+            const candidates = isSpoken ? seg.speaker_candidates : null;
+            
+            batchSegments.push({
+              text: seg.text,
+              type: isSpoken ? "dialogue" : "narration",
+              speaker: isSpoken ? getMostLikelySpeaker(candidates ?? undefined) : null,
+              speakerCandidates: candidates ?? null,
+              needsReview: needsReview(candidates ?? undefined),
+              sentiment: seg.sentiment ?? null,
+              chunkId: chunk.chunk_id,
+              approxDurationSeconds: chunk.approx_duration_seconds,
+            });
+          }
+        }
+      }
+      
+      // Yield this batch's results
       yield {
         type: 'chunk',
         chunkIndex: i + 1,
-        totalChunks,
-        segments: result.segments,
-        detectedSpeakers: Array.from(allSpeakers),
+        totalChunks: totalBatches,
+        segments: batchSegments,
+        detectedSpeakers: Array.from(allCharacters),
       };
+      
     } catch (error) {
       yield { 
         type: 'error', 
         error: error instanceof Error ? error.message : 'Unknown error',
         chunkIndex: i + 1,
-        totalChunks
+        totalChunks: totalBatches
       };
       return;
     }
@@ -362,15 +388,17 @@ export async function* parseTextWithLLMStreaming(
   // Final completion update
   yield { 
     type: 'complete',
-    chunkIndex: totalChunks,
-    totalChunks,
-    detectedSpeakers: Array.from(allSpeakers)
+    chunkIndex: totalBatches,
+    totalChunks: totalBatches,
+    detectedSpeakers: Array.from(allCharacters)
   };
 }
 
 export async function getAvailableModels(): Promise<string[]> {
   return [
-    "openai/chatgpt-5.2",
+    "openai/chatgpt-4o-latest",
+    "openai/gpt-4o",
+    "openai/gpt-4o-mini", 
     "meta-llama/llama-3.3-70b-instruct",
     "meta-llama/llama-3.1-8b-instruct",
     "mistralai/mistral-7b-instruct",
