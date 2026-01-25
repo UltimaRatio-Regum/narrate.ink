@@ -44,7 +44,8 @@ class TextParser:
         speaker_history: list[str] = []
         
         current_pos = 0
-        quote_pattern = re.compile(r'"([^"]+)"')
+        # Match straight quotes, curly double quotes, and curly single quotes
+        quote_pattern = re.compile(r'[""\u201c\u201d]([^""\u201c\u201d]+)[""\u201c\u201d]|[\u2018\u2019\'\u2019]([^\u2018\u2019\'\u2019]+)[\u2018\u2019\'\u2019]')
         
         for match in quote_pattern.finditer(text):
             quote_start = match.start()
