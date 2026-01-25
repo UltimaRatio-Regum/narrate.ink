@@ -108,6 +108,10 @@ Or use the combined start script:
 
 ## Recent Changes
 
+- **2026-01-25**: Enhanced LLM speaker detection with chunking and name hints
+  - Text is now split into ~2000 char chunks at safe boundaries (avoids splitting quotes)
+  - Automatic name extraction finds potential speakers using dialogue verb patterns
+  - Users can optionally provide known speaker names to guide the AI
 - **2026-01-25**: Added LLM-powered speaker detection via OpenRouter integration
   - Users can choose between AI Detection (LLM) and Basic (heuristic) modes
   - Model selection dropdown with Llama, Mistral, Qwen, DeepSeek options

@@ -1,7 +1,8 @@
 import { useState, useRef } from "react";
-import { Upload, FileText, Sparkles, Brain, ChevronDown } from "lucide-react";
+import { Upload, FileText, Sparkles, Brain, ChevronDown, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import {
   DropdownMenu,
@@ -9,11 +10,16 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 
 interface TextInputProps {
   value: string;
   onChange: (text: string) => void;
-  onAnalyze: (useLLM: boolean, model?: string) => void;
+  onAnalyze: (useLLM: boolean, model?: string, knownSpeakers?: string[]) => void;
   isAnalyzing: boolean;
 }
 
@@ -29,6 +35,8 @@ export function TextInput({ value, onChange, onAnalyze, isAnalyzing }: TextInput
   const [isDragOver, setIsDragOver] = useState(false);
   const [selectedModel, setSelectedModel] = useState(LLM_MODELS[0]);
   const [useLLM, setUseLLM] = useState(true);
+  const [speakerInput, setSpeakerInput] = useState("");
+  const [showSpeakerInput, setShowSpeakerInput] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -63,7 +71,13 @@ export function TextInput({ value, onChange, onAnalyze, isAnalyzing }: TextInput
   };
 
   const handleAnalyze = () => {
-    onAnalyze(useLLM, useLLM ? selectedModel.id : undefined);
+    // Parse speaker names from comma-separated input
+    const knownSpeakers = speakerInput
+      .split(",")
+      .map(s => s.trim())
+      .filter(s => s.length > 0);
+    
+    onAnalyze(useLLM, useLLM ? selectedModel.id : undefined, knownSpeakers.length > 0 ? knownSpeakers : undefined);
   };
 
   const wordCount = value.trim() ? value.trim().split(/\s+/).length : 0;
@@ -132,6 +146,35 @@ export function TextInput({ value, onChange, onAnalyze, isAnalyzing }: TextInput
           )}
         </div>
         
+        {useLLM && (
+          <Collapsible open={showSpeakerInput} onOpenChange={setShowSpeakerInput}>
+            <CollapsibleTrigger asChild>
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="gap-2 w-full justify-start text-muted-foreground hover:text-foreground"
+                data-testid="button-toggle-speakers"
+              >
+                <Users className="h-4 w-4" />
+                <span>Known speakers (optional)</span>
+                <ChevronDown className={`h-3 w-3 ml-auto transition-transform ${showSpeakerInput ? "rotate-180" : ""}`} />
+              </Button>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="pt-2">
+              <Input
+                value={speakerInput}
+                onChange={(e) => setSpeakerInput(e.target.value)}
+                placeholder="Enter character names separated by commas (e.g., John, Mary, Narrator)"
+                className="text-sm"
+                data-testid="input-known-speakers"
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                Providing speaker names helps the AI identify who is speaking more accurately
+              </p>
+            </CollapsibleContent>
+          </Collapsible>
+        )}
+
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div className="flex items-center gap-4 text-sm text-muted-foreground">
             <span data-testid="text-word-count">{wordCount.toLocaleString()} words</span>

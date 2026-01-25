@@ -28,7 +28,11 @@ export async function registerRoutes(
   // LLM-powered text parsing endpoint with automatic fallback
   app.post('/api/parse-text-llm', express.json(), async (req: Request, res: Response) => {
     try {
-      const { text, model } = req.body as { text: string; model?: string };
+      const { text, model, knownSpeakers } = req.body as { 
+        text: string; 
+        model?: string;
+        knownSpeakers?: string[];
+      };
       
       if (!text || typeof text !== 'string') {
         return res.status(400).json({ error: 'Text is required' });
@@ -46,7 +50,8 @@ export async function registerRoutes(
       }
 
       try {
-        const result = await parseTextWithLLM(text, model);
+        const speakers = Array.isArray(knownSpeakers) ? knownSpeakers : [];
+        const result = await parseTextWithLLM(text, model, speakers);
         
         // Calculate proper text positions and add sentiment placeholders
         let currentPos = 0;

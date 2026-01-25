@@ -50,9 +50,14 @@ export default function Home() {
 
   // Parse text mutation (supports both LLM and basic heuristic parsing)
   const parseTextMutation = useMutation({
-    mutationFn: async ({ text, useLLM, model }: { text: string; useLLM: boolean; model?: string }) => {
+    mutationFn: async ({ text, useLLM, model, knownSpeakers }: { 
+      text: string; 
+      useLLM: boolean; 
+      model?: string;
+      knownSpeakers?: string[];
+    }) => {
       const endpoint = useLLM ? "/api/parse-text-llm" : "/api/parse-text";
-      const body = useLLM ? { text, model } : { text };
+      const body = useLLM ? { text, model, knownSpeakers } : { text };
       const response = await apiRequest("POST", endpoint, body);
       return await response.json() as ParseTextResponse;
     },
@@ -176,9 +181,9 @@ export default function Home() {
   });
 
   // Handlers
-  const handleAnalyze = useCallback((useLLM: boolean, model?: string) => {
+  const handleAnalyze = useCallback((useLLM: boolean, model?: string, knownSpeakers?: string[]) => {
     if (inputText.trim()) {
-      parseTextMutation.mutate({ text: inputText, useLLM, model });
+      parseTextMutation.mutate({ text: inputText, useLLM, model, knownSpeakers });
     }
   }, [inputText, parseTextMutation]);
 
