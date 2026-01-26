@@ -207,7 +207,11 @@ class TTSService:
         voice_path: Optional[str] = None,
         exaggeration: float = 0.5,
     ) -> np.ndarray:
-        """Generate audio using Chatterbox TTS (voice cloning)."""
+        """
+        Generate audio using Chatterbox TTS (voice cloning).
+        Tries local GPU model first, then falls back to HuggingFace Spaces via Gradio.
+        """
+        # Try local Chatterbox with CUDA first
         if self.model is not None and voice_path:
             try:
                 wav = self.model.generate(
@@ -217,12 +221,101 @@ class TTSService:
                 )
                 return wav.numpy().flatten()
             except Exception as e:
-                logger.warning(f"Chatterbox generation failed: {e}")
+                logger.warning(f"Local Chatterbox generation failed: {e}")
+        
+        # Fall back to HuggingFace Spaces via Gradio client
+        if voice_path:
+            try:
+                return await self._generate_with_chatterbox_gradio(text, voice_path, exaggeration)
+            except Exception as e:
+                logger.warning(f"Gradio Chatterbox failed: {e}")
         
         logger.warning("Chatterbox not available, falling back to edge-tts")
         if EDGE_TTS_AVAILABLE:
             return await self._generate_with_edge_tts(text, EDGE_TTS_VOICES["default"])
         return self._synthesize_fallback(text)
+    
+    async def _generate_with_chatterbox_gradio(
+        self,
+        text: str,
+        voice_path: str,
+        exaggeration: float = 0.5,
+        temperature: float = 0.8,
+        cfg_weight: float = 0.5,
+    ) -> np.ndarray:
+        """
+        Generate audio using Chatterbox TTS via HuggingFace Spaces Gradio API.
+        Max 300 characters per request.
+        """
+        from gradio_client import Client, handle_file
+        import soundfile as sf
+        
+        # Validate inputs
+        if not text or len(text.strip()) == 0:
+            logger.warning("Empty text provided to Chatterbox Gradio")
+            raise ValueError("Text cannot be empty")
+        
+        # Validate voice_path exists
+        if not os.path.exists(voice_path):
+            logger.warning(f"Voice file not found: {voice_path}")
+            raise FileNotFoundError(f"Voice reference file not found: {voice_path}")
+        
+        logger.info(f"Generating with Chatterbox Gradio (text length: {len(text)})")
+        
+        # Chatterbox has a 300 character limit - truncate at word boundary
+        if len(text) > 300:
+            truncated = text[:300]
+            # Try to truncate at word boundary
+            last_space = truncated.rfind(' ')
+            if last_space > 200:  # Only use word boundary if reasonable
+                truncated = truncated[:last_space]
+            text = truncated
+            logger.warning(f"Text truncated to {len(text)} characters for Chatterbox")
+        
+        def call_gradio():
+            client = Client("ResembleAI/Chatterbox")
+            result = client.predict(
+                text_input=text,
+                audio_prompt_path_input=handle_file(voice_path),
+                exaggeration_input=exaggeration,
+                temperature_input=temperature,
+                seed_num_input=0,  # Random seed
+                cfgw_input=cfg_weight,
+                vad_trim_input=False,
+                api_name="/generate_tts_audio"
+            )
+            return result
+        
+        # Run synchronous Gradio call in thread pool
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, call_gradio)
+        
+        logger.info(f"Chatterbox Gradio result type: {type(result)}")
+        
+        # Handle different return types from gradio_client
+        # Can be a string path, tuple, or FileData object
+        if isinstance(result, str):
+            result_path = result
+        elif isinstance(result, (list, tuple)):
+            result_path = result[0]
+        elif hasattr(result, 'path'):
+            # FileData object
+            result_path = result.path
+        else:
+            logger.error(f"Unexpected Gradio result type: {type(result)}")
+            raise ValueError(f"Unexpected result from Chatterbox: {type(result)}")
+        
+        logger.info(f"Reading audio from: {result_path}")
+        
+        # Read the audio file
+        audio, sr = sf.read(result_path)
+        
+        # Resample if needed
+        if sr != self.sample_rate:
+            from scipy import signal
+            audio = signal.resample(audio, int(len(audio) * self.sample_rate / sr))
+        
+        return audio.astype(np.float32)
     
     async def _generate_with_openai(self, text: str, voice: str = "alloy") -> np.ndarray:
         """

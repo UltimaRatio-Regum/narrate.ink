@@ -128,6 +128,13 @@ Or use the combined start script:
 
 ## Recent Changes
 
+- **2026-01-26**: Chatterbox voice cloning via HuggingFace Spaces
+  - Uses gradio_client to connect to ResembleAI/Chatterbox Space
+  - No GPU required - runs in cloud via Gradio API
+  - Supports voice cloning with audio reference files
+  - Falls back from local Chatterbox → Gradio API → edge-tts → sine wave
+  - 300 character limit per generation (auto-truncated)
+  - Configurable exaggeration, temperature, and CFG weight
 - **2026-01-26**: Multi-engine TTS selection with improved fallback chain
   - TTS Engine dropdown in Settings: Edge TTS (default), OpenAI, Chatterbox, Piper
   - Voice Library dynamically updates based on selected engine
