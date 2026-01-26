@@ -134,11 +134,13 @@ class AudioProcessor:
         
         processed = audio_data
         
-        # Apply speed change (even small changes like 1%)
+        # Apply speed change using pyrubberband's time_stretch
+        # This is PITCH-INVARIANT by default - changes tempo without affecting pitch
         if abs(speed_factor - 1.0) > 0.001:
             processed = pyrb.time_stretch(processed, sample_rate, speed_factor)
         
-        # Apply pitch shift (even small changes like 0.12 semitones)
+        # Apply pitch shift using pyrubberband's pitch_shift
+        # This is SPEED-INVARIANT - changes pitch without affecting tempo
         if abs(pitch_offset) > 0.01:
             processed = pyrb.pitch_shift(processed, sample_rate, pitch_offset)
         
