@@ -113,15 +113,60 @@ function convertLLMResult(result: LLMParseResult): ParsedTextResult {
   };
 }
 
-// Split text into ~10 paragraph batches for conversation context
-function splitIntoParagraphBatches(text: string, paragraphsPerBatch: number = 10): string[] {
+// Split text into ~2-3 paragraph batches for better progress tracking
+// Avoids splitting mid-dialogue by looking for safe break points
+function splitIntoParagraphBatches(text: string, paragraphsPerBatch: number = 3): string[] {
   // Split by double newlines (paragraphs)
   const paragraphs = text.split(/\n\n+/).filter(p => p.trim().length > 0);
   
+  if (paragraphs.length === 0) {
+    return text.trim() ? [text] : [];
+  }
+  
   const batches: string[] = [];
-  for (let i = 0; i < paragraphs.length; i += paragraphsPerBatch) {
-    const batch = paragraphs.slice(i, i + paragraphsPerBatch).join("\n\n");
-    batches.push(batch);
+  let currentBatch: string[] = [];
+  let straightQuoteCount = 0;  // Straight quotes toggle (odd = open, even = closed)
+  let curlyQuoteBalance = 0;   // Curly quotes have distinct open/close
+  
+  for (let i = 0; i < paragraphs.length; i++) {
+    const para = paragraphs[i];
+    currentBatch.push(para);
+    
+    // Count straight quotes (these toggle between open/close)
+    const straightQuotes = (para.match(/"/g) || []).length;
+    straightQuoteCount += straightQuotes;
+    
+    // Count curly quotes (distinct open/close)
+    const curlyOpen = (para.match(/[\u201c]/g) || []).length;
+    const curlyClose = (para.match(/[\u201d]/g) || []).length;
+    curlyQuoteBalance += curlyOpen - curlyClose;
+    
+    // Check if we should finalize this batch
+    const atBatchLimit = currentBatch.length >= paragraphsPerBatch;
+    const isLastParagraph = i === paragraphs.length - 1;
+    
+    // Quotes are balanced if:
+    // - Straight quote count is even (pairs closed)
+    // - Curly quote balance is 0 or negative
+    const straightQuotesBalanced = (straightQuoteCount % 2) === 0;
+    const curlyQuotesBalanced = curlyQuoteBalance <= 0;
+    const quotesBalanced = straightQuotesBalanced && curlyQuotesBalanced;
+    
+    // Prevent runaway batches: cap at 2x the target size
+    const batchTooLarge = currentBatch.length >= paragraphsPerBatch * 2;
+    
+    // Only split if quotes are balanced (not mid-dialogue) or at end or batch too large
+    if ((atBatchLimit && quotesBalanced) || isLastParagraph || batchTooLarge) {
+      batches.push(currentBatch.join("\n\n"));
+      currentBatch = [];
+      straightQuoteCount = 0;
+      curlyQuoteBalance = 0;
+    }
+  }
+  
+  // Handle any remaining paragraphs
+  if (currentBatch.length > 0) {
+    batches.push(currentBatch.join("\n\n"));
   }
   
   return batches.length > 0 ? batches : [text];
@@ -211,7 +256,7 @@ async function parseWithConversation(
   model: string,
   knownSpeakers: string[]
 ): Promise<LLMParseResult> {
-  const batches = splitIntoParagraphBatches(text, 10);
+  const batches = splitIntoParagraphBatches(text, 3);
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
     { role: "system", content: SYSTEM_PROMPT }
   ];
@@ -317,7 +362,7 @@ export async function* parseTextWithLLMStreaming(
     return;
   }
 
-  const batches = splitIntoParagraphBatches(text, 10);
+  const batches = splitIntoParagraphBatches(text, 3);
   const totalBatches = batches.length;
   
   // Initial progress update
