@@ -318,14 +318,14 @@ class TTSService:
         exaggeration: float = 0.5,
     ) -> np.ndarray:
         """
-        Generate audio using Chatterbox TTS via custom HuggingFace Space REST API.
-        POST to /gradio_api/api/tts_to_mp3 with text, seed, voice_reference_audio.
+        Generate audio using Chatterbox TTS via custom HuggingFace Space (Gradio client).
+        Uses api_name="/gradio_api/api/tts_to_mp3" with (text, seed, voice_reference_audio).
         Returns MP3 audio which is decoded to numpy array.
         Raises exceptions on failure (no fallbacks).
         """
         from chatterbox_config import CHATTERBOX_PAID_CONFIG, is_paid_chatterbox_configured
+        from gradio_client import Client, handle_file
         import soundfile as sf
-        import aiohttp
         import io
         
         if not is_paid_chatterbox_configured():
@@ -349,57 +349,65 @@ class TTSService:
             logger.warning(f"Text truncated to {len(text)} characters for Chatterbox paid")
         
         try:
-            space_url = config["space_url"].rstrip('/')
+            space_url = config["space_url"]
             api_key = config.get("api_key", "")
             timeout_secs = config.get("timeout", 120)
             
-            # Build the API endpoint URL
-            api_url = f"{space_url}/gradio_api/api/tts_to_mp3"
-            logger.info(f"Calling Chatterbox Paid API: {api_url}")
+            logger.info(f"Connecting to Chatterbox paid space: {space_url}")
             
-            # Prepare headers
-            headers = {}
-            if api_key:
-                headers["Authorization"] = f"Bearer {api_key}"
+            # Run in executor to avoid blocking
+            loop = asyncio.get_running_loop()
             
-            # Create timeout
-            timeout = aiohttp.ClientTimeout(total=timeout_secs)
-            
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                # Send as multipart form data with voice file
-                data = aiohttp.FormData()
-                data.add_field('text', text)
-                data.add_field('seed', '')  # Empty string for random seed
+            def call_gradio():
+                # Pass HF token if provided (for private spaces)
+                client_kwargs = {}
+                if api_key:
+                    client_kwargs["hf_token"] = api_key
                 
-                # Add voice reference audio file
-                with open(voice_path, 'rb') as voice_file:
-                    voice_content = voice_file.read()
-                    voice_filename = os.path.basename(voice_path)
-                    data.add_field(
-                        'voice_reference_audio',
-                        voice_content,
-                        filename=voice_filename,
-                        content_type='audio/wav'
-                    )
-                
-                async with session.post(api_url, data=data, headers=headers) as response:
-                    if response.status != 200:
-                        error_text = await response.text()
-                        raise RuntimeError(f"Chatterbox API returned {response.status}: {error_text}")
-                    
-                    # Response should be MP3 audio data
-                    content_type = response.headers.get('Content-Type', '')
-                    audio_data = await response.read()
-                    
-                    if len(audio_data) == 0:
-                        raise RuntimeError("Chatterbox API returned empty audio data")
-                    
-                    logger.info(f"Received {len(audio_data)} bytes of audio (Content-Type: {content_type})")
+                client = Client(space_url, **client_kwargs)
+                # Call with: text, seed, voice_reference_audio
+                result = client.predict(
+                    text,
+                    None,  # seed (optional, None for random)
+                    handle_file(voice_path),  # voice reference audio file
+                    api_name="/gradio_api/api/tts_to_mp3"
+                )
+                return result
             
-            # Decode MP3 to numpy array using pydub
+            # Apply timeout to the executor call
+            result = await asyncio.wait_for(
+                loop.run_in_executor(None, call_gradio),
+                timeout=timeout_secs
+            )
+            
+            logger.info(f"Chatterbox paid result type: {type(result)}, value: {result}")
+            
+            # Result should be a file path to MP3
+            if isinstance(result, str):
+                audio_file_path = result
+            elif hasattr(result, 'path'):
+                audio_file_path = result.path
+            elif hasattr(result, 'name'):
+                audio_file_path = result.name
+            elif isinstance(result, (list, tuple)) and len(result) > 0:
+                first = result[0]
+                if isinstance(first, str):
+                    audio_file_path = first
+                elif hasattr(first, 'path'):
+                    audio_file_path = first.path
+                elif hasattr(first, 'name'):
+                    audio_file_path = first.name
+                else:
+                    raise RuntimeError(f"Unexpected result format: {type(first)}")
+            else:
+                raise RuntimeError(f"Unexpected result format: {type(result)}")
+            
+            logger.info(f"Audio file path: {audio_file_path}")
+            
+            # Read the MP3 file - use pydub for MP3 decoding
             from pydub import AudioSegment
             
-            audio_segment = AudioSegment.from_file(io.BytesIO(audio_data), format="mp3")
+            audio_segment = AudioSegment.from_file(audio_file_path, format="mp3")
             
             # Convert to numpy array
             samples = np.array(audio_segment.get_array_of_samples())
@@ -419,9 +427,9 @@ class TTSService:
             logger.info(f"Chatterbox paid generated {len(audio)/self.sample_rate:.2f}s of audio")
             return audio.astype(np.float32)
         
-        except aiohttp.ClientError as e:
-            logger.error(f"Chatterbox paid API connection failed: {e}")
-            raise RuntimeError(f"Chatterbox Paid connection failed: {e}") from e
+        except asyncio.TimeoutError:
+            logger.error(f"Chatterbox paid timed out after {timeout_secs}s")
+            raise RuntimeError(f"Chatterbox Paid timed out after {timeout_secs} seconds") from None
         except Exception as e:
             logger.error(f"Chatterbox paid space failed: {e}")
             raise RuntimeError(f"Chatterbox Paid generation failed: {e}") from e
