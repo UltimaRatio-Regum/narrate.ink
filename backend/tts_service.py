@@ -318,14 +318,15 @@ class TTSService:
         exaggeration: float = 0.5,
     ) -> np.ndarray:
         """
-        Generate audio using Chatterbox TTS via custom HuggingFace Space (Gradio API).
-        Uses the /run/predict endpoint with (text, seed, voice_reference_audio) parameters.
+        Generate audio using Chatterbox TTS via custom HuggingFace Space REST API.
+        POST to /gradio_api/api/tts_to_mp3 with text, seed, voice_reference_audio.
+        Returns MP3 audio which is decoded to numpy array.
         Raises exceptions on failure (no fallbacks).
         """
         from chatterbox_config import CHATTERBOX_PAID_CONFIG, is_paid_chatterbox_configured
-        from gradio_client import Client
         import soundfile as sf
         import aiohttp
+        import io
         
         if not is_paid_chatterbox_configured():
             raise RuntimeError("Chatterbox Paid is not configured. Please set CHATTERBOX_API_URL environment variable.")
@@ -348,112 +349,79 @@ class TTSService:
             logger.warning(f"Text truncated to {len(text)} characters for Chatterbox paid")
         
         try:
-            # Load the voice reference audio
-            voice_audio, sr = sf.read(voice_path, dtype="float32")
-            
-            # Connect to the custom HuggingFace Space
-            space_url = config["space_url"]
+            space_url = config["space_url"].rstrip('/')
             api_key = config.get("api_key", "")
             timeout_secs = config.get("timeout", 120)
-            logger.info(f"Connecting to Chatterbox paid space: {space_url}")
             
-            # Run in executor to avoid blocking
-            loop = asyncio.get_running_loop()
+            # Build the API endpoint URL
+            api_url = f"{space_url}/gradio_api/api/tts_to_mp3"
+            logger.info(f"Calling Chatterbox Paid API: {api_url}")
             
-            def call_gradio():
-                # Pass HF token if provided (for private spaces)
-                client_kwargs = {}
-                if api_key:
-                    client_kwargs["hf_token"] = api_key
+            # Prepare headers
+            headers = {}
+            if api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
+            
+            # Create timeout
+            timeout = aiohttp.ClientTimeout(total=timeout_secs)
+            
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                # Send as multipart form data with voice file
+                data = aiohttp.FormData()
+                data.add_field('text', text)
+                data.add_field('seed', '')  # Empty string for random seed
                 
-                client = Client(space_url, **client_kwargs)
-                # Call predict with: text, seed, voice_reference_audio
-                result = client.predict(
-                    text,
-                    None,  # seed (optional)
-                    (sr, voice_audio),  # voice reference: (sample_rate, waveform array)
-                    api_name="/run/predict"
-                )
-                return result
+                # Add voice reference audio file
+                with open(voice_path, 'rb') as voice_file:
+                    voice_content = voice_file.read()
+                    voice_filename = os.path.basename(voice_path)
+                    data.add_field(
+                        'voice_reference_audio',
+                        voice_content,
+                        filename=voice_filename,
+                        content_type='audio/wav'
+                    )
+                
+                async with session.post(api_url, data=data, headers=headers) as response:
+                    if response.status != 200:
+                        error_text = await response.text()
+                        raise RuntimeError(f"Chatterbox API returned {response.status}: {error_text}")
+                    
+                    # Response should be MP3 audio data
+                    content_type = response.headers.get('Content-Type', '')
+                    audio_data = await response.read()
+                    
+                    if len(audio_data) == 0:
+                        raise RuntimeError("Chatterbox API returned empty audio data")
+                    
+                    logger.info(f"Received {len(audio_data)} bytes of audio (Content-Type: {content_type})")
             
-            # Apply timeout to the executor call
-            result = await asyncio.wait_for(
-                loop.run_in_executor(None, call_gradio),
-                timeout=timeout_secs
-            )
+            # Decode MP3 to numpy array using pydub
+            from pydub import AudioSegment
             
-            logger.info(f"Chatterbox paid result type: {type(result)}, value: {result}")
+            audio_segment = AudioSegment.from_file(io.BytesIO(audio_data), format="mp3")
             
-            # Helper to extract URL/path from an object (prefer URL over path)
-            def extract_audio_path(obj):
-                # Prefer URL over path for remote files
-                if hasattr(obj, 'url') and obj.url:
-                    return obj.url
-                if isinstance(obj, dict) and obj.get("url"):
-                    return obj["url"]
-                if hasattr(obj, 'name') and obj.name:
-                    return obj.name
-                if isinstance(obj, dict) and obj.get("name"):
-                    return obj["name"]
-                if hasattr(obj, 'path') and obj.path:
-                    return obj.path
-                if isinstance(obj, dict) and obj.get("path"):
-                    return obj["path"]
-                if isinstance(obj, str):
-                    return obj
-                return None
+            # Convert to numpy array
+            samples = np.array(audio_segment.get_array_of_samples())
             
-            # Handle the response - could be a file path, URL, dict, or FileData object
-            audio_file_path = None
+            # Handle stereo -> mono conversion
+            if audio_segment.channels == 2:
+                samples = samples.reshape((-1, 2)).mean(axis=1)
             
-            if isinstance(result, tuple) and len(result) > 0:
-                # Sometimes returns (FileData, ...) tuple
-                audio_file_path = extract_audio_path(result[0])
-            else:
-                audio_file_path = extract_audio_path(result)
-            
-            if not audio_file_path:
-                raise Exception(f"Unexpected response format from Chatterbox paid: {type(result)} - {result}")
-            
-            logger.info(f"Audio file path: {audio_file_path}")
-            
-            # Create aiohttp session with timeout for downloads
-            download_timeout = aiohttp.ClientTimeout(total=timeout_secs)
-            
-            # Helper to download audio from URL
-            async def download_audio(url):
-                logger.info(f"Downloading audio from: {url}")
-                async with aiohttp.ClientSession(timeout=download_timeout) as session:
-                    async with session.get(url) as response:
-                        if response.status != 200:
-                            raise Exception(f"Failed to download audio: {response.status}")
-                        return await response.read()
-            
-            # If it's a URL, download the audio
-            if audio_file_path.startswith("http"):
-                audio_data = await download_audio(audio_file_path)
-                import io
-                audio, audio_sr = sf.read(io.BytesIO(audio_data))
-            elif os.path.exists(audio_file_path):
-                # Local file path (if accessible)
-                audio, audio_sr = sf.read(audio_file_path)
-            else:
-                # Path is a remote temp file - construct URL and download
-                # HuggingFace Spaces serve temp files via /file=path
-                file_url = f"{space_url.rstrip('/')}/file={audio_file_path}"
-                logger.info(f"Trying to download from constructed URL: {file_url}")
-                audio_data = await download_audio(file_url)
-                import io
-                audio, audio_sr = sf.read(io.BytesIO(audio_data))
+            # Normalize to float32 [-1, 1]
+            audio = samples.astype(np.float32) / (2 ** (audio_segment.sample_width * 8 - 1))
             
             # Resample if needed
-            if audio_sr != self.sample_rate:
-                import scipy.signal as signal
-                audio = signal.resample(audio, int(len(audio) * self.sample_rate / audio_sr))
+            if audio_segment.frame_rate != self.sample_rate:
+                from scipy import signal
+                audio = signal.resample(audio, int(len(audio) * self.sample_rate / audio_segment.frame_rate))
             
             logger.info(f"Chatterbox paid generated {len(audio)/self.sample_rate:.2f}s of audio")
             return audio.astype(np.float32)
         
+        except aiohttp.ClientError as e:
+            logger.error(f"Chatterbox paid API connection failed: {e}")
+            raise RuntimeError(f"Chatterbox Paid connection failed: {e}") from e
         except Exception as e:
             logger.error(f"Chatterbox paid space failed: {e}")
             raise RuntimeError(f"Chatterbox Paid generation failed: {e}") from e
