@@ -135,6 +135,13 @@ Or use the combined start script:
   - Voice ID prefix system: `edge:`, `openai:`, `library:` for engine-specific voices
   - Dynamic voice dropdowns update based on selected TTS engine
   - 10-minute SSE timeout for long audiobook generation
+- **2026-01-26**: Chatterbox TTS split into free and paid tiers
+  - **Chatterbox Free**: Uses HuggingFace Spaces via Gradio API, 300 char limit
+  - **Chatterbox Paid**: Custom API endpoint, no char limit, requires config
+  - Configuration via environment variables: CHATTERBOX_API_URL, CHATTERBOX_API_KEY
+  - `/api/chatterbox-status` endpoint for checking configuration
+  - Frontend shows warning when paid is selected but not configured
+  - Falls back to free tier if paid API not available
 - **2026-01-26**: Chatterbox voice cloning via HuggingFace Spaces
   - Uses gradio_client to connect to ResembleAI/Chatterbox Space
   - No GPU required - runs in cloud via Gradio API
