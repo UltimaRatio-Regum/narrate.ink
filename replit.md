@@ -128,6 +128,13 @@ Or use the combined start script:
 
 ## Recent Changes
 
+- **2026-01-26**: Streaming progress and audio quality improvements
+  - Real-time progress updates via Server-Sent Events (SSE) with asyncio.Queue
+  - Progress bar now updates incrementally during generation (not 0%→100% jumps)
+  - Trailing silence trimming on audio chunks using RMS analysis (50ms blocks, 0.01 threshold)
+  - Voice ID prefix system: `edge:`, `openai:`, `library:` for engine-specific voices
+  - Dynamic voice dropdowns update based on selected TTS engine
+  - 10-minute SSE timeout for long audiobook generation
 - **2026-01-26**: Chatterbox voice cloning via HuggingFace Spaces
   - Uses gradio_client to connect to ResembleAI/Chatterbox Space
   - No GPU required - runs in cloud via Gradio API
