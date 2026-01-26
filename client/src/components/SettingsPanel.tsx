@@ -1,21 +1,75 @@
-import { Settings, Sliders } from "lucide-react";
+import { Settings, Sliders, Volume2, Cpu } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
+import type { TTSEngine } from "@shared/schema";
+
+interface TTSEngineOption {
+  id: TTSEngine;
+  name: string;
+  description: string;
+  badge?: string;
+  badgeVariant?: "default" | "secondary" | "destructive" | "outline";
+}
+
+const TTS_ENGINES: TTSEngineOption[] = [
+  {
+    id: "edge-tts",
+    name: "Edge TTS (Azure Neural)",
+    description: "47 English neural voices, free, high quality",
+    badge: "Recommended",
+    badgeVariant: "default",
+  },
+  {
+    id: "openai",
+    name: "OpenAI TTS",
+    description: "6 premium voices, requires API key",
+    badge: "API Key",
+    badgeVariant: "secondary",
+  },
+  {
+    id: "chatterbox",
+    name: "Chatterbox (Voice Cloning)",
+    description: "Clone any voice from samples, external endpoint",
+    badge: "Cloning",
+    badgeVariant: "outline",
+  },
+  {
+    id: "piper",
+    name: "Piper TTS",
+    description: "Fast open source TTS, many voices",
+    badge: "Local",
+    badgeVariant: "outline",
+  },
+];
 
 interface SettingsPanelProps {
   exaggeration: number;
   pauseDuration: number;
+  ttsEngine: TTSEngine;
   onExaggerationChange: (value: number) => void;
   onPauseDurationChange: (value: number) => void;
+  onTTSEngineChange: (engine: TTSEngine) => void;
 }
 
 export function SettingsPanel({
   exaggeration,
   pauseDuration,
+  ttsEngine,
   onExaggerationChange,
   onPauseDurationChange,
+  onTTSEngineChange,
 }: SettingsPanelProps) {
+  const selectedEngine = TTS_ENGINES.find(e => e.id === ttsEngine);
+
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -28,6 +82,42 @@ export function SettingsPanel({
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
+        <div className="space-y-3">
+          <div className="space-y-1">
+            <Label className="flex items-center gap-2">
+              <Cpu className="h-4 w-4 text-muted-foreground" />
+              TTS Engine
+            </Label>
+            <p className="text-xs text-muted-foreground">
+              Choose the text-to-speech engine
+            </p>
+          </div>
+          <Select value={ttsEngine} onValueChange={(v) => onTTSEngineChange(v as TTSEngine)}>
+            <SelectTrigger data-testid="select-tts-engine">
+              <SelectValue placeholder="Select TTS engine" />
+            </SelectTrigger>
+            <SelectContent>
+              {TTS_ENGINES.map((engine) => (
+                <SelectItem key={engine.id} value={engine.id} data-testid={`option-engine-${engine.id}`}>
+                  <div className="flex items-center gap-2">
+                    <span>{engine.name}</span>
+                    {engine.badge && (
+                      <Badge variant={engine.badgeVariant} className="text-xs py-0 px-1.5">
+                        {engine.badge}
+                      </Badge>
+                    )}
+                  </div>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {selectedEngine && (
+            <p className="text-xs text-muted-foreground">
+              {selectedEngine.description}
+            </p>
+          )}
+        </div>
+
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">

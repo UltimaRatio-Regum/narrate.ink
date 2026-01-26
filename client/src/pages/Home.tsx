@@ -14,7 +14,7 @@ import { AudioPlayer } from "@/components/AudioPlayer";
 import { GenerationProgress } from "@/components/GenerationProgress";
 import { SettingsPanel } from "@/components/SettingsPanel";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import type { TextSegment, VoiceSample, SpeakerConfig, ParseTextResponse, LibraryVoice } from "@shared/schema";
+import type { TextSegment, VoiceSample, SpeakerConfig, ParseTextResponse, LibraryVoice, TTSEngine, EdgeVoice, OpenAIVoice } from "@shared/schema";
 
 export default function Home() {
   const { toast } = useToast();
@@ -33,6 +33,7 @@ export default function Home() {
   // Settings state
   const [exaggeration, setExaggeration] = useState(0.5);
   const [pauseDuration, setPauseDuration] = useState(500);
+  const [ttsEngine, setTTSEngine] = useState<TTSEngine>("edge-tts");
 
   // Generation state
   const [generationStatus, setGenerationStatus] = useState<"idle" | "processing" | "completed" | "error">("idle");
@@ -54,10 +55,24 @@ export default function Home() {
     queryKey: ["/api/voices"],
   });
 
-  // Fetch voice library
+  // Fetch voice library (for voice cloning engines)
   const { data: libraryVoices = [], isLoading: isLibraryLoading } = useQuery<LibraryVoice[]>({
     queryKey: ["/api/voice-library"],
   });
+
+  // Fetch edge-tts voices
+  const { data: edgeVoicesData } = useQuery<{ voices: EdgeVoice[], presets: Record<string, string> }>({
+    queryKey: ["/api/edge-voices"],
+    enabled: ttsEngine === "edge-tts",
+  });
+  const edgeVoices = edgeVoicesData?.voices ?? [];
+
+  // Fetch OpenAI voices
+  const { data: openaiVoicesData } = useQuery<{ voices: OpenAIVoice[], presets: Record<string, string> }>({
+    queryKey: ["/api/openai-voices"],
+    enabled: ttsEngine === "openai",
+  });
+  const openaiVoices = openaiVoicesData?.voices ?? [];
 
   // Selected library voice
   const [selectedLibraryVoiceId, setSelectedLibraryVoiceId] = useState<string | null>(null);
@@ -171,6 +186,7 @@ export default function Home() {
           defaultExaggeration: exaggeration,
           pauseBetweenSegments: pauseDuration,
           speakers: speakerConfigs,
+          ttsEngine,
         },
       });
 
@@ -481,9 +497,12 @@ export default function Home() {
           <div className="flex flex-col gap-6">
             <VoiceLibrary
               voices={libraryVoices}
+              edgeVoices={edgeVoices}
+              openaiVoices={openaiVoices}
               selectedId={selectedLibraryVoiceId}
               onSelect={setSelectedLibraryVoiceId}
               isLoading={isLibraryLoading}
+              ttsEngine={ttsEngine}
             />
 
             <VoiceSampleManager
@@ -509,8 +528,10 @@ export default function Home() {
             <SettingsPanel
               exaggeration={exaggeration}
               pauseDuration={pauseDuration}
+              ttsEngine={ttsEngine}
               onExaggerationChange={setExaggeration}
               onPauseDurationChange={setPauseDuration}
+              onTTSEngineChange={setTTSEngine}
             />
           </div>
         </div>

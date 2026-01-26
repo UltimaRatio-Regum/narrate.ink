@@ -1,5 +1,46 @@
 import { z } from "zod";
 
+// TTS Engine types
+export const ttsEngineSchema = z.enum([
+  "edge-tts",      // Microsoft Azure Neural TTS - free, 300+ voices
+  "openai",        // OpenAI TTS - requires API key
+  "chatterbox",    // Chatterbox TTS - voice cloning (external endpoint)
+  "piper",         // Piper TTS - open source, fast, local
+]);
+
+export type TTSEngine = z.infer<typeof ttsEngineSchema>;
+
+// TTS Engine metadata
+export const ttsEngineInfoSchema = z.object({
+  id: ttsEngineSchema,
+  name: z.string(),
+  description: z.string(),
+  supportsVoiceCloning: z.boolean(),
+  requiresApiKey: z.boolean(),
+  voiceType: z.enum(["preset", "cloning", "both"]),
+});
+
+export type TTSEngineInfo = z.infer<typeof ttsEngineInfoSchema>;
+
+// Edge-TTS voice (preset neural voice)
+export const edgeVoiceSchema = z.object({
+  id: z.string(),           // e.g., "en-US-AriaNeural"
+  name: z.string(),         // e.g., "Microsoft Aria Online (Natural)"
+  gender: z.string(),       // "Male" or "Female"
+  locale: z.string(),       // e.g., "en-US"
+});
+
+export type EdgeVoice = z.infer<typeof edgeVoiceSchema>;
+
+// OpenAI TTS voice
+export const openaiVoiceSchema = z.object({
+  id: z.string(),           // e.g., "alloy"
+  name: z.string(),         // e.g., "Alloy"
+  description: z.string(),  // e.g., "Neutral, balanced voice"
+});
+
+export type OpenAIVoice = z.infer<typeof openaiVoiceSchema>;
+
 // Voice sample for TTS
 export const voiceSampleSchema = z.object({
   id: z.string(),
@@ -91,6 +132,7 @@ export const projectConfigSchema = z.object({
   defaultExaggeration: z.number().min(0).max(1).default(0.5),
   pauseBetweenSegments: z.number().min(0).max(3000).default(500),
   speakers: z.record(z.string(), speakerConfigSchema),
+  ttsEngine: ttsEngineSchema.default("edge-tts"),
 });
 
 export type ProjectConfig = z.infer<typeof projectConfigSchema>;

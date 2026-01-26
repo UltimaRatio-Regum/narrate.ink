@@ -62,6 +62,7 @@ A web application that converts plain text into expressive audiobooks using AI-p
 | DELETE | /api/voices/:id | Delete voice sample |
 | GET | /api/voice-library | List pre-recorded library voices |
 | GET | /api/edge-voices | List available edge-tts neural voices |
+| GET | /api/openai-voices | List available OpenAI TTS voices |
 | POST | /api/parse-text | Parse text into segments |
 | POST | /api/generate | Generate audiobook |
 
@@ -127,6 +128,14 @@ Or use the combined start script:
 
 ## Recent Changes
 
+- **2026-01-26**: Multi-engine TTS selection with improved fallback chain
+  - TTS Engine dropdown in Settings: Edge TTS (default), OpenAI, Chatterbox, Piper
+  - Voice Library dynamically updates based on selected engine
+  - OpenAI TTS with 6 premium voices (alloy, echo, fable, onyx, nova, shimmer)
+  - Improved fallback chain: selected engine → edge-tts → sine wave (better quality)
+  - OpenAI voice mapping validates voice names before API calls
+  - Piper TTS checks for CLI availability before attempting generation
+  - New `/api/openai-voices` endpoint for listing OpenAI TTS voices
 - **2026-01-26**: Integrated edge-tts as primary TTS engine
   - Microsoft Azure Neural TTS with 300+ voices (47 English voices)
   - Works without GPU, high-quality speech synthesis

@@ -33,6 +33,7 @@ class ProjectConfig(BaseModel):
     defaultExaggeration: float = 0.5
     pauseBetweenSegments: int = 500
     speakers: dict[str, SpeakerConfig] = {}
+    ttsEngine: str = "edge-tts"  # edge-tts, openai, chatterbox, piper
 
 
 class VoiceSample(BaseModel):

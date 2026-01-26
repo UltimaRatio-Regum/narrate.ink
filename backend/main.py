@@ -18,7 +18,7 @@ from pydantic import BaseModel
 
 from text_parser import TextParser
 from audio_processor import AudioProcessor
-from tts_service import TTSService, list_edge_voices, EDGE_TTS_VOICES
+from tts_service import TTSService, list_edge_voices, EDGE_TTS_VOICES, OPENAI_TTS_VOICES
 from models import (
     VoiceSample,
     TextSegment,
@@ -244,6 +244,22 @@ async def get_edge_voices():
     except Exception as e:
         logger.error(f"Failed to list edge-tts voices: {e}")
         return {"voices": [], "presets": EDGE_TTS_VOICES}
+
+
+@app.get("/openai-voices")
+async def get_openai_voices():
+    """Get available OpenAI TTS voices"""
+    return {
+        "voices": [
+            {"id": "alloy", "name": "Alloy", "description": "Neutral, balanced voice"},
+            {"id": "echo", "name": "Echo", "description": "Male, warm tone"},
+            {"id": "fable", "name": "Fable", "description": "British accent"},
+            {"id": "onyx", "name": "Onyx", "description": "Deep, authoritative"},
+            {"id": "nova", "name": "Nova", "description": "Female, energetic"},
+            {"id": "shimmer", "name": "Shimmer", "description": "Female, soft"},
+        ],
+        "presets": OPENAI_TTS_VOICES,
+    }
 
 
 @app.post("/parse-text")

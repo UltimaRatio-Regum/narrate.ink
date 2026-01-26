@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import { Library, Play, Pause, ChevronDown, ChevronUp, User, MapPin, Search, Filter } from "lucide-react";
+import { Library, Play, Pause, ChevronDown, ChevronUp, User, MapPin, Search, Filter, Globe } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -17,20 +17,26 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import type { LibraryVoice } from "@shared/schema";
+import type { LibraryVoice, EdgeVoice, OpenAIVoice, TTSEngine } from "@shared/schema";
 
 interface VoiceLibraryProps {
   voices: LibraryVoice[];
+  edgeVoices?: EdgeVoice[];
+  openaiVoices?: OpenAIVoice[];
   selectedId: string | null;
   onSelect: (id: string) => void;
   isLoading?: boolean;
+  ttsEngine: TTSEngine;
 }
 
 export function VoiceLibrary({
   voices,
+  edgeVoices = [],
+  openaiVoices = [],
   selectedId,
   onSelect,
   isLoading = false,
+  ttsEngine,
 }: VoiceLibraryProps) {
   const [isOpen, setIsOpen] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
@@ -62,7 +68,11 @@ export function VoiceLibrary({
     return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
 
-  const filteredVoices = voices.filter((voice) => {
+  const showClonableVoices = ttsEngine === "chatterbox";
+  const showEdgeVoices = ttsEngine === "edge-tts";
+  const showOpenaiVoices = ttsEngine === "openai";
+
+  const filteredLibraryVoices = voices.filter((voice) => {
     const matchesSearch =
       searchQuery === "" ||
       voice.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -75,8 +85,58 @@ export function VoiceLibrary({
     return matchesSearch && matchesGender;
   });
 
-  const maleCount = voices.filter((v) => v.gender === "M").length;
-  const femaleCount = voices.filter((v) => v.gender === "F").length;
+  const filteredEdgeVoices = edgeVoices.filter((voice) => {
+    const matchesSearch =
+      searchQuery === "" ||
+      voice.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      voice.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      voice.locale.toLowerCase().includes(searchQuery.toLowerCase());
+
+    const matchesGender =
+      genderFilter === "all" || 
+      (genderFilter === "M" && voice.gender === "Male") ||
+      (genderFilter === "F" && voice.gender === "Female");
+
+    return matchesSearch && matchesGender;
+  });
+
+  const filteredOpenaiVoices = openaiVoices.filter((voice) => {
+    const matchesSearch =
+      searchQuery === "" ||
+      voice.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      voice.description.toLowerCase().includes(searchQuery.toLowerCase());
+    return matchesSearch;
+  });
+
+  const getTotalCount = () => {
+    if (showEdgeVoices) return edgeVoices.length;
+    if (showOpenaiVoices) return openaiVoices.length;
+    if (showClonableVoices) return voices.length;
+    return 0;
+  };
+  const totalCount = getTotalCount();
+
+  const maleCount = showEdgeVoices 
+    ? edgeVoices.filter((v) => v.gender === "Male").length
+    : voices.filter((v) => v.gender === "M").length;
+  const femaleCount = showEdgeVoices 
+    ? edgeVoices.filter((v) => v.gender === "Female").length
+    : voices.filter((v) => v.gender === "F").length;
+
+  const getEngineDescription = () => {
+    switch (ttsEngine) {
+      case "edge-tts":
+        return "Microsoft Azure neural voices";
+      case "chatterbox":
+        return "Voice cloning samples";
+      case "openai":
+        return "OpenAI TTS voices";
+      case "piper":
+        return "Piper TTS voices";
+      default:
+        return "Available voices";
+    }
+  };
 
   return (
     <Card>
@@ -89,7 +149,7 @@ export function VoiceLibrary({
                 Voice Library
               </CardTitle>
               <CardDescription className="mt-1">
-                {voices.length} pre-recorded voices available
+                {totalCount} {getEngineDescription()}
               </CardDescription>
             </div>
             <CollapsibleTrigger asChild>
@@ -123,7 +183,7 @@ export function VoiceLibrary({
                   <SelectValue placeholder="Filter" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All ({voices.length})</SelectItem>
+                  <SelectItem value="all">All ({totalCount})</SelectItem>
                   <SelectItem value="M">Male ({maleCount})</SelectItem>
                   <SelectItem value="F">Female ({femaleCount})</SelectItem>
                 </SelectContent>
@@ -134,63 +194,156 @@ export function VoiceLibrary({
               <div className="text-center py-8 text-muted-foreground">
                 <div className="animate-pulse">Loading voice library...</div>
               </div>
-            ) : filteredVoices.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">
-                <Library className="h-10 w-10 mx-auto mb-3 opacity-50" />
-                <p className="text-sm">No voices match your search</p>
-              </div>
-            ) : (
-              <ScrollArea className="h-[280px]">
-                <div className="space-y-2">
-                  {filteredVoices.map((voice) => (
-                    <div
-                      key={voice.id}
-                      className={`flex items-center gap-3 p-3 rounded-md border cursor-pointer transition-colors hover-elevate ${
-                        selectedId === voice.id
-                          ? "border-primary bg-primary/5"
-                          : "border-transparent bg-muted/50"
-                      }`}
-                      onClick={() => onSelect(voice.id)}
-                      data-testid={`library-voice-${voice.id}`}
-                    >
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="shrink-0"
-                        onClick={(e) => togglePlay(voice, e)}
-                        data-testid={`button-play-library-${voice.id}`}
+            ) : showOpenaiVoices ? (
+              filteredOpenaiVoices.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <Library className="h-10 w-10 mx-auto mb-3 opacity-50" />
+                  <p className="text-sm">No voices match your search</p>
+                </div>
+              ) : (
+                <ScrollArea className="h-[280px]">
+                  <div className="space-y-2">
+                    {filteredOpenaiVoices.map((voice) => (
+                      <div
+                        key={voice.id}
+                        className={`flex items-center gap-3 p-3 rounded-md border cursor-pointer transition-colors hover-elevate ${
+                          selectedId === voice.id
+                            ? "border-primary bg-primary/5"
+                            : "border-transparent bg-muted/50"
+                        }`}
+                        onClick={() => onSelect(voice.id)}
+                        data-testid={`openai-voice-${voice.id}`}
                       >
-                        {playingId === voice.id ? (
-                          <Pause className="h-4 w-4" />
-                        ) : (
-                          <Play className="h-4 w-4" />
-                        )}
-                      </Button>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <p className="font-medium truncate" data-testid={`text-voice-name-${voice.id}`}>
-                            {voice.name}
-                          </p>
-                          <Badge variant="outline" className="shrink-0">
-                            {voice.language}
-                          </Badge>
+                        <div className="h-9 w-9 rounded-full bg-emerald-500/10 flex items-center justify-center shrink-0">
+                          <User className="h-4 w-4 text-emerald-500" />
                         </div>
-                        <div className="flex items-center gap-3 text-xs text-muted-foreground mt-1">
-                          <span className="flex items-center gap-1">
-                            <User className="h-3 w-3" />
-                            {voice.gender === "M" ? "Male" : "Female"}, {voice.age}
-                          </span>
-                          <span className="flex items-center gap-1">
-                            <MapPin className="h-3 w-3" />
-                            {voice.location.replace(/_/g, " ")}
-                          </span>
-                          <span>{formatDuration(voice.duration)}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="font-medium truncate text-sm" data-testid={`text-openai-voice-name-${voice.id}`}>
+                              {voice.name}
+                            </p>
+                            <Badge variant="outline" className="text-xs py-0 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400">
+                              OpenAI
+                            </Badge>
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            {voice.description}
+                          </p>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
+                </ScrollArea>
+              )
+            ) : showEdgeVoices ? (
+              filteredEdgeVoices.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <Library className="h-10 w-10 mx-auto mb-3 opacity-50" />
+                  <p className="text-sm">No voices match your search</p>
                 </div>
-              </ScrollArea>
+              ) : (
+                <ScrollArea className="h-[280px]">
+                  <div className="space-y-2">
+                    {filteredEdgeVoices.map((voice) => (
+                      <div
+                        key={voice.id}
+                        className={`flex items-center gap-3 p-3 rounded-md border cursor-pointer transition-colors hover-elevate ${
+                          selectedId === voice.id
+                            ? "border-primary bg-primary/5"
+                            : "border-transparent bg-muted/50"
+                        }`}
+                        onClick={() => onSelect(voice.id)}
+                        data-testid={`edge-voice-${voice.id}`}
+                      >
+                        <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                          <Globe className="h-4 w-4 text-primary" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="font-medium truncate text-sm" data-testid={`text-edge-voice-name-${voice.id}`}>
+                              {voice.name.replace("Microsoft ", "").replace(" Online (Natural)", "")}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-3 text-xs text-muted-foreground mt-1">
+                            <Badge variant="outline" className="text-xs py-0">
+                              {voice.locale}
+                            </Badge>
+                            <span className="flex items-center gap-1">
+                              <User className="h-3 w-3" />
+                              {voice.gender}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </ScrollArea>
+              )
+            ) : showClonableVoices ? (
+              filteredLibraryVoices.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <Library className="h-10 w-10 mx-auto mb-3 opacity-50" />
+                  <p className="text-sm">No voices match your search</p>
+                </div>
+              ) : (
+                <ScrollArea className="h-[280px]">
+                  <div className="space-y-2">
+                    {filteredLibraryVoices.map((voice) => (
+                      <div
+                        key={voice.id}
+                        className={`flex items-center gap-3 p-3 rounded-md border cursor-pointer transition-colors hover-elevate ${
+                          selectedId === voice.id
+                            ? "border-primary bg-primary/5"
+                            : "border-transparent bg-muted/50"
+                        }`}
+                        onClick={() => onSelect(voice.id)}
+                        data-testid={`library-voice-${voice.id}`}
+                      >
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="shrink-0"
+                          onClick={(e) => togglePlay(voice, e)}
+                          data-testid={`button-play-library-${voice.id}`}
+                        >
+                          {playingId === voice.id ? (
+                            <Pause className="h-4 w-4" />
+                          ) : (
+                            <Play className="h-4 w-4" />
+                          )}
+                        </Button>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="font-medium truncate" data-testid={`text-voice-name-${voice.id}`}>
+                              {voice.name}
+                            </p>
+                            <Badge variant="outline" className="shrink-0">
+                              {voice.language}
+                            </Badge>
+                          </div>
+                          <div className="flex items-center gap-3 text-xs text-muted-foreground mt-1">
+                            <span className="flex items-center gap-1">
+                              <User className="h-3 w-3" />
+                              {voice.gender === "M" ? "Male" : "Female"}, {voice.age}
+                            </span>
+                            <span className="flex items-center gap-1">
+                              <MapPin className="h-3 w-3" />
+                              {voice.location.replace(/_/g, " ")}
+                            </span>
+                            <span>{formatDuration(voice.duration)}</span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </ScrollArea>
+              )
+            ) : (
+              <div className="text-center py-8 text-muted-foreground">
+                <Library className="h-10 w-10 mx-auto mb-3 opacity-50" />
+                <p className="text-sm">Voice library not available for {ttsEngine}</p>
+                <p className="text-xs mt-1">Select Edge TTS, OpenAI, or Chatterbox for voice options</p>
+              </div>
             )}
           </CardContent>
         </CollapsibleContent>

@@ -47,6 +47,16 @@ EDGE_TTS_VOICES = {
     "default": "en-US-AriaNeural",
 }
 
+OPENAI_TTS_VOICES = {
+    "alloy": "alloy",       # Neutral, balanced
+    "echo": "echo",         # Male, warm
+    "fable": "fable",       # British accent
+    "onyx": "onyx",         # Deep, authoritative
+    "nova": "nova",         # Female, energetic  
+    "shimmer": "shimmer",   # Female, soft
+    "default": "alloy",
+}
+
 
 class TTSService:
     """
@@ -111,8 +121,9 @@ class TTSService:
             audio = await self._generate_segment_audio_async(
                 text=segment.text,
                 voice_path=voice_path,
-                edge_voice=edge_voice,
+                edge_voice=edge_voice if config.ttsEngine == "edge-tts" else None,
                 exaggeration=config.defaultExaggeration,
+                tts_engine=config.ttsEngine,
             )
             
             if segment.sentiment:
@@ -170,13 +181,33 @@ class TTSService:
         self,
         text: str,
         voice_path: Optional[str] = None,
-        edge_voice: str = "en-US-AriaNeural",
+        edge_voice: Optional[str] = "en-US-AriaNeural",
         exaggeration: float = 0.5,
+        tts_engine: str = "edge-tts",
     ) -> np.ndarray:
         """
         Generate audio for a single text segment.
-        Uses Chatterbox if available with GPU, otherwise edge-tts.
+        Dispatches to the appropriate TTS engine based on config.
         """
+        if tts_engine == "chatterbox":
+            return await self._generate_with_chatterbox(text, voice_path, exaggeration)
+        elif tts_engine == "openai":
+            openai_voice = OPENAI_TTS_VOICES.get(edge_voice, OPENAI_TTS_VOICES["default"]) if edge_voice else "alloy"
+            return await self._generate_with_openai(text, openai_voice)
+        elif tts_engine == "piper":
+            return await self._generate_with_piper(text, voice_path)
+        else:  # edge-tts (default)
+            if EDGE_TTS_AVAILABLE:
+                return await self._generate_with_edge_tts(text, edge_voice or "en-US-AriaNeural")
+            return self._synthesize_fallback(text)
+    
+    async def _generate_with_chatterbox(
+        self,
+        text: str,
+        voice_path: Optional[str] = None,
+        exaggeration: float = 0.5,
+    ) -> np.ndarray:
+        """Generate audio using Chatterbox TTS (voice cloning)."""
         if self.model is not None and voice_path:
             try:
                 wav = self.model.generate(
@@ -186,12 +217,100 @@ class TTSService:
                 )
                 return wav.numpy().flatten()
             except Exception as e:
-                logger.warning(f"Chatterbox generation failed: {e}, using edge-tts")
+                logger.warning(f"Chatterbox generation failed: {e}")
         
+        logger.warning("Chatterbox not available, falling back to edge-tts")
         if EDGE_TTS_AVAILABLE:
-            return await self._generate_with_edge_tts(text, edge_voice)
-        
+            return await self._generate_with_edge_tts(text, EDGE_TTS_VOICES["default"])
         return self._synthesize_fallback(text)
+    
+    async def _generate_with_openai(self, text: str, voice: str = "alloy") -> np.ndarray:
+        """
+        Generate audio using OpenAI TTS API.
+        Requires OPENAI_API_KEY environment variable.
+        """
+        try:
+            import httpx
+            api_key = os.environ.get("OPENAI_API_KEY")
+            if not api_key:
+                logger.warning("OpenAI API key not found, using fallback")
+                return self._synthesize_fallback(text)
+            
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    "https://api.openai.com/v1/audio/speech",
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": "tts-1",
+                        "input": text,
+                        "voice": voice,
+                        "response_format": "mp3",
+                    },
+                    timeout=60.0,
+                )
+                
+                if response.status_code != 200:
+                    logger.error(f"OpenAI TTS failed: {response.text}")
+                    return self._synthesize_fallback(text)
+                
+                return await self._mp3_bytes_to_numpy(response.content)
+        except Exception as e:
+            logger.error(f"OpenAI TTS error: {e}")
+            return self._synthesize_fallback(text)
+    
+    async def _generate_with_piper(self, text: str, voice_path: Optional[str] = None) -> np.ndarray:
+        """
+        Generate audio using Piper TTS (open source, fast).
+        Falls back to edge-tts if Piper not installed.
+        """
+        try:
+            import subprocess
+            import shutil
+            
+            if not shutil.which("piper"):
+                logger.warning("Piper not installed, falling back to edge-tts")
+                if EDGE_TTS_AVAILABLE:
+                    return await self._generate_with_edge_tts(text, EDGE_TTS_VOICES["default"])
+                return self._synthesize_fallback(text)
+            
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+                output_path = f.name
+            
+            cmd = ["piper", "--output_file", output_path]
+            if voice_path:
+                cmd.extend(["--model", voice_path])
+            
+            process = subprocess.run(
+                cmd,
+                input=text,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            
+            if process.returncode != 0:
+                logger.warning(f"Piper TTS failed: {process.stderr}, falling back to edge-tts")
+                if EDGE_TTS_AVAILABLE:
+                    return await self._generate_with_edge_tts(text, EDGE_TTS_VOICES["default"])
+                return self._synthesize_fallback(text)
+            
+            import soundfile as sf
+            audio, sr = sf.read(output_path)
+            os.unlink(output_path)
+            
+            if sr != self.sample_rate:
+                from scipy import signal
+                audio = signal.resample(audio, int(len(audio) * self.sample_rate / sr))
+            
+            return audio.astype(np.float32)
+        except Exception as e:
+            logger.warning(f"Piper TTS error: {e}, falling back to edge-tts")
+            if EDGE_TTS_AVAILABLE:
+                return await self._generate_with_edge_tts(text, EDGE_TTS_VOICES["default"])
+            return self._synthesize_fallback(text)
     
     async def _generate_with_edge_tts(self, text: str, voice: str = "en-US-AriaNeural") -> np.ndarray:
         """
