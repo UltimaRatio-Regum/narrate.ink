@@ -275,7 +275,7 @@ async def get_chatterbox_status():
         },
         "paid": {
             "configured": is_paid_chatterbox_configured(),
-            "api_url_set": bool(CHATTERBOX_PAID_CONFIG["api_url"]),
+            "space_url": CHATTERBOX_PAID_CONFIG["space_url"],
             "api_key_set": bool(CHATTERBOX_PAID_CONFIG["api_key"]),
             "max_chars": CHATTERBOX_PAID_CONFIG["max_chars"],
         },

@@ -141,12 +141,13 @@ Or use the combined start script:
   - Dynamic voice dropdowns update based on selected TTS engine
   - 10-minute SSE timeout for long audiobook generation
 - **2026-01-26**: Chatterbox TTS split into free and paid tiers
-  - **Chatterbox Free**: Uses HuggingFace Spaces via Gradio API, 300 char limit
-  - **Chatterbox Paid**: Custom API endpoint, no char limit, requires config
-  - Configuration via environment variables: CHATTERBOX_API_URL, CHATTERBOX_API_KEY
+  - **Chatterbox Free**: Uses ResembleAI HuggingFace Space via Gradio API, 300 char limit, GPU quota limits
+  - **Chatterbox Paid**: Uses custom HuggingFace Space via Gradio API `/predict` endpoint, no char limit
+  - Default paid space: `https://cherithcutestory-chatterbox-docker.hf.space`
+  - Configuration via environment variables: CHATTERBOX_API_URL (space URL), CHATTERBOX_API_KEY (optional)
   - `/api/chatterbox-status` endpoint for checking configuration
-  - Frontend shows warning when paid is selected but not configured
-  - Falls back to free tier if paid API not available
+  - Voice cloning: passes (sample_rate, audio_array) tuple to Space
+  - Falls back to free tier if paid space fails
 - **2026-01-26**: Chatterbox voice cloning via HuggingFace Spaces
   - Uses gradio_client to connect to ResembleAI/Chatterbox Space
   - No GPU required - runs in cloud via Gradio API

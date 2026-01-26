@@ -4,13 +4,13 @@ Update these settings when using a custom Chatterbox endpoint.
 """
 import os
 
-# Chatterbox Paid API Configuration
+# Chatterbox Paid API Configuration (HuggingFace Space via Gradio)
 CHATTERBOX_PAID_CONFIG = {
-    # API endpoint URL for the paid Chatterbox service
-    # Example: "https://your-chatterbox-api.com/generate"
-    "api_url": os.environ.get("CHATTERBOX_API_URL", ""),
+    # HuggingFace Space URL for the paid Chatterbox service
+    # Default points to user's custom Docker-based Space (no GPU quota limits)
+    "space_url": os.environ.get("CHATTERBOX_API_URL", "https://cherithcutestory-chatterbox-docker.hf.space"),
     
-    # API key for authentication
+    # API key for authentication (optional, for private spaces)
     "api_key": os.environ.get("CHATTERBOX_API_KEY", ""),
     
     # Request timeout in seconds
@@ -42,7 +42,8 @@ CHATTERBOX_FREE_CONFIG = {
 
 def is_paid_chatterbox_configured() -> bool:
     """Check if paid Chatterbox API is properly configured."""
-    return bool(CHATTERBOX_PAID_CONFIG["api_url"] and CHATTERBOX_PAID_CONFIG["api_key"])
+    # Only requires space_url to be set (api_key is optional for public spaces)
+    return bool(CHATTERBOX_PAID_CONFIG["space_url"])
 
 
 def get_chatterbox_config(use_paid: bool = False) -> dict:
