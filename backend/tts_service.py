@@ -359,10 +359,17 @@ class TTSService:
             loop = asyncio.get_running_loop()
             
             def call_gradio():
+                import httpx
+                
                 # Pass HF token if provided (for private spaces)
                 client_kwargs = {}
                 if api_key:
                     client_kwargs["hf_token"] = api_key
+                
+                # Set longer timeout for httpx (default is 10s which is too short for TTS)
+                client_kwargs["httpx_kwargs"] = {
+                    "timeout": httpx.Timeout(timeout_secs, connect=60.0)
+                }
                 
                 client = Client(space_url, **client_kwargs)
                 # Call with: text, seed, voice_reference_audio
