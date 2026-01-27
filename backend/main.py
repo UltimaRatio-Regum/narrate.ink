@@ -1058,6 +1058,87 @@ async def generate_from_upload(upload_id: str, request: GenerateFromUploadReques
     return {"jobIds": job_ids, "count": len(job_ids)}
 
 
+import json
+PROSODY_SETTINGS_FILE = Path("prosody_settings.json")
+
+
+def load_prosody_settings():
+    """Load prosody settings from file if it exists."""
+    if PROSODY_SETTINGS_FILE.exists():
+        try:
+            with open(PROSODY_SETTINGS_FILE, "r") as f:
+                data = json.load(f)
+            for emotion in AudioProcessor.VALID_EMOTIONS:
+                if "pitch" in data and emotion in data["pitch"]:
+                    AudioProcessor.EMOTION_PITCH_MAP[emotion] = float(data["pitch"][emotion])
+                if "speed" in data and emotion in data["speed"]:
+                    AudioProcessor.EMOTION_SPEED_MAP[emotion] = float(data["speed"][emotion])
+                if "volume" in data and emotion in data["volume"]:
+                    AudioProcessor.EMOTION_VOLUME_MAP[emotion] = float(data["volume"][emotion])
+            logger.info("Loaded prosody settings from file")
+        except Exception as e:
+            logger.warning(f"Failed to load prosody settings: {e}")
+
+
+def save_prosody_settings():
+    """Save prosody settings to file."""
+    data = {
+        "pitch": AudioProcessor.EMOTION_PITCH_MAP.copy(),
+        "speed": AudioProcessor.EMOTION_SPEED_MAP.copy(),
+        "volume": AudioProcessor.EMOTION_VOLUME_MAP.copy(),
+    }
+    try:
+        with open(PROSODY_SETTINGS_FILE, "w") as f:
+            json.dump(data, f, indent=2)
+        logger.info("Saved prosody settings to file")
+    except Exception as e:
+        logger.warning(f"Failed to save prosody settings: {e}")
+
+
+load_prosody_settings()
+
+
+@app.get("/prosody-settings")
+async def get_prosody_settings():
+    """Get the current emotion prosody settings (pitch, speed, volume)."""
+    return {
+        "pitch": AudioProcessor.EMOTION_PITCH_MAP.copy(),
+        "speed": AudioProcessor.EMOTION_SPEED_MAP.copy(),
+        "volume": AudioProcessor.EMOTION_VOLUME_MAP.copy(),
+        "emotions": AudioProcessor.VALID_EMOTIONS,
+    }
+
+
+class ProsodySettingsRequest(BaseModel):
+    pitch: dict
+    speed: dict
+    volume: dict
+
+
+@app.post("/prosody-settings")
+async def update_prosody_settings(request: ProsodySettingsRequest):
+    """Update the emotion prosody settings with validation."""
+    for emotion in AudioProcessor.VALID_EMOTIONS:
+        if emotion in request.pitch:
+            val = float(request.pitch[emotion])
+            AudioProcessor.EMOTION_PITCH_MAP[emotion] = max(-12, min(12, val))
+        if emotion in request.speed:
+            val = float(request.speed[emotion])
+            AudioProcessor.EMOTION_SPEED_MAP[emotion] = max(0.5, min(2.0, val))
+        if emotion in request.volume:
+            val = float(request.volume[emotion])
+            AudioProcessor.EMOTION_VOLUME_MAP[emotion] = max(0.3, min(2.0, val))
+    
+    save_prosody_settings()
+    
+    return {
+        "success": True,
+        "pitch": AudioProcessor.EMOTION_PITCH_MAP.copy(),
+        "speed": AudioProcessor.EMOTION_SPEED_MAP.copy(),
+        "volume": AudioProcessor.EMOTION_VOLUME_MAP.copy(),
+    }
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -70,6 +70,23 @@ class AudioProcessor:
         "melancholy": 0.99,
     }
     
+    # Volume adjustments per emotion (1.0 = no change, 1.1 = 10% louder, 0.95 = 5% quieter)
+    # Volume is applied as a simple amplitude multiplier
+    EMOTION_VOLUME_MAP = {
+        "neutral": 1.00,
+        "happy": 1.05,      # 5% louder - upbeat energy
+        "sad": 0.95,        # 5% quieter - subdued
+        "angry": 1.10,      # 10% louder - intensity
+        "fearful": 0.95,    # 5% quieter - timid
+        "surprised": 1.08,  # 8% louder - exclamation
+        "disgusted": 1.02,  # 2% louder - slight emphasis
+        "excited": 1.10,    # 10% louder - enthusiasm
+        "calm": 0.95,       # 5% quieter - relaxed
+        "anxious": 1.03,    # 3% louder - tension
+        "hopeful": 1.02,    # 2% louder - gentle lift
+        "melancholy": 0.93, # 7% quieter - wistful
+    }
+    
     # Valid emotions that the LLM should use
     VALID_EMOTIONS = list(EMOTION_PITCH_MAP.keys())
     
@@ -98,9 +115,10 @@ class AudioProcessor:
         emotion_score: float = 1.0,
         base_pitch_offset: float = 0,
         base_speed_factor: float = 1.0,
+        base_volume_factor: float = 1.0,
     ) -> np.ndarray:
         """
-        Apply pitch and speed changes based on emotion.
+        Apply pitch, speed, and volume changes based on emotion.
         
         Args:
             audio_data: Audio samples as numpy array
@@ -109,6 +127,7 @@ class AudioProcessor:
             emotion_score: Confidence of emotion (0-1), used to scale the effect
             base_pitch_offset: Additional pitch offset in semitones
             base_speed_factor: Additional speed multiplier
+            base_volume_factor: Additional volume multiplier
             
         Returns:
             Processed audio data
@@ -116,33 +135,34 @@ class AudioProcessor:
         if not PYRUBBERBAND_AVAILABLE:
             return audio_data
         
-        # Normalize emotion label to lowercase
         emotion_label = emotion_label.lower() if emotion_label else "neutral"
         
-        # Get emotion-based adjustments (+/-1% as specified)
         pitch_offset = self.EMOTION_PITCH_MAP.get(emotion_label, 0) * emotion_score
         pitch_offset += base_pitch_offset
         
         speed_factor = self.EMOTION_SPEED_MAP.get(emotion_label, 1.0)
-        # Scale the speed adjustment by emotion score
         speed_factor = 1.0 + (speed_factor - 1.0) * emotion_score
         speed_factor *= base_speed_factor
         
-        # Clamp to safe ranges
+        volume_factor = self.EMOTION_VOLUME_MAP.get(emotion_label, 1.0)
+        volume_factor = 1.0 + (volume_factor - 1.0) * emotion_score
+        volume_factor *= base_volume_factor
+        
         speed_factor = max(0.5, min(2.0, speed_factor))
         pitch_offset = max(-12, min(12, pitch_offset))
+        volume_factor = max(0.3, min(2.0, volume_factor))
         
         processed = audio_data
         
-        # Apply speed change using pyrubberband's time_stretch
-        # This is PITCH-INVARIANT by default - changes tempo without affecting pitch
         if abs(speed_factor - 1.0) > 0.001:
             processed = pyrb.time_stretch(processed, sample_rate, speed_factor)
         
-        # Apply pitch shift using pyrubberband's pitch_shift
-        # This is SPEED-INVARIANT - changes pitch without affecting tempo
         if abs(pitch_offset) > 0.01:
             processed = pyrb.pitch_shift(processed, sample_rate, pitch_offset)
+        
+        if abs(volume_factor - 1.0) > 0.001:
+            processed = processed * volume_factor
+            processed = np.clip(processed, -1.0, 1.0)
         
         return processed
     
@@ -154,13 +174,14 @@ class AudioProcessor:
         sentiment_score: float = 0.5,
         base_pitch_offset: float = 0,
         base_speed_factor: float = 1.0,
+        base_volume_factor: float = 1.0,
     ) -> np.ndarray:
         """
         Legacy method - redirects to apply_emotion_prosody for backwards compatibility.
         """
         return self.apply_emotion_prosody(
             audio_data, sample_rate, sentiment_label, sentiment_score,
-            base_pitch_offset, base_speed_factor
+            base_pitch_offset, base_speed_factor, base_volume_factor
         )
     
     def apply_pitch_shift(
