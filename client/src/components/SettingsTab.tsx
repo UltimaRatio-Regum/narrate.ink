@@ -96,6 +96,12 @@ export function SettingsTab() {
   const [defaultVoice, setDefaultVoice] = useState(() =>
     localStorage.getItem("voxlibris-default-voice") || ""
   );
+  const [pauseBetweenSegments, setPauseBetweenSegments] = useState(() =>
+    parseInt(localStorage.getItem("voxlibris-pause-between-segments") || "500", 10)
+  );
+  const [maxSilenceMs, setMaxSilenceMs] = useState(() =>
+    parseInt(localStorage.getItem("voxlibris-max-silence-ms") || "300", 10)
+  );
   const [localProsody, setLocalProsody] = useState<ProsodySettings | null>(null);
 
   const { data: prosodyData } = useQuery<ProsodySettings>({
@@ -152,6 +158,22 @@ export function SettingsTab() {
   const handleVoiceChange = (voice: string) => {
     setDefaultVoice(voice);
     localStorage.setItem("voxlibris-default-voice", voice);
+  };
+
+  const handlePauseBetweenSegmentsChange = (value: string) => {
+    const num = parseInt(value, 10);
+    if (!isNaN(num) && num >= 0 && num <= 5000) {
+      setPauseBetweenSegments(num);
+      localStorage.setItem("voxlibris-pause-between-segments", String(num));
+    }
+  };
+
+  const handleMaxSilenceChange = (value: string) => {
+    const num = parseInt(value, 10);
+    if (!isNaN(num) && num >= 0 && num <= 5000) {
+      setMaxSilenceMs(num);
+      localStorage.setItem("voxlibris-max-silence-ms", String(num));
+    }
   };
 
   const handleProsodyChange = (emotion: string, field: "pitch" | "speed" | "volume" | "intensity", value: string) => {
@@ -250,6 +272,42 @@ export function SettingsTab() {
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2 pt-4 border-t">
+            <div className="space-y-2">
+              <Label htmlFor="pause-between-segments">Pause Between Segments (ms)</Label>
+              <Input
+                id="pause-between-segments"
+                type="number"
+                min={0}
+                max={5000}
+                step={50}
+                value={pauseBetweenSegments}
+                onChange={(e) => handlePauseBetweenSegmentsChange(e.target.value)}
+                data-testid="input-pause-between-segments"
+              />
+              <p className="text-xs text-muted-foreground">
+                Initial silence added between audio segments (0-5000ms)
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="max-silence">Max Silence Duration (ms)</Label>
+              <Input
+                id="max-silence"
+                type="number"
+                min={0}
+                max={5000}
+                step={50}
+                value={maxSilenceMs}
+                onChange={(e) => handleMaxSilenceChange(e.target.value)}
+                data-testid="input-max-silence"
+              />
+              <p className="text-xs text-muted-foreground">
+                Compress any silence longer than this in final audio (0-5000ms)
+              </p>
             </div>
           </div>
         </CardContent>

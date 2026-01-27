@@ -115,7 +115,8 @@ export function JobsPanel({ onPlayAudio }: JobsPanelProps) {
   };
 
   const downloadJobAudio = (jobId: string) => {
-    window.open(`/api/jobs/${jobId}/audio`, "_blank");
+    const maxSilenceMs = localStorage.getItem("voxlibris-max-silence-ms") || "300";
+    window.open(`/api/jobs/${jobId}/audio?max_silence_ms=${maxSilenceMs}`, "_blank");
   };
 
   useEffect(() => {
