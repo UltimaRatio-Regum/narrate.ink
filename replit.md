@@ -140,6 +140,11 @@ Or use the combined start script:
 
 ## Recent Changes
 
+- **2026-01-27**: Aggressive silence trimming for TTS audio
+  - **Two-pass silence removal**: First scans for 2+ seconds of contiguous silence and truncates everything after (catches model hallucinations), then trims remaining silence from edges
+  - **New methods in AudioProcessor**: `trim_silence_edges()`, `truncate_at_long_silence()`, `aggressive_silence_trim()`
+  - **Legacy compatibility**: `trim_trailing_silence()` now redirects to `aggressive_silence_trim()` for better results
+  - Particularly effective for Chatterbox TTS which often produces 5+ seconds of trailing silence and occasional gibberish
 - **2026-01-27**: Asynchronous TTS job processing with persistence
   - **Background job system**: TTS generation now runs in background threads, allowing the UI to remain responsive
   - **Database persistence**: Jobs and segments stored in PostgreSQL, surviving page reloads and server restarts

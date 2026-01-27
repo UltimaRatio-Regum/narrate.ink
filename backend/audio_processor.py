@@ -241,29 +241,24 @@ class AudioProcessor:
         num_samples = int(sample_rate * duration_ms / 1000)
         return np.zeros(num_samples, dtype=np.float32)
     
-    def trim_trailing_silence(
+    def trim_silence_edges(
         self,
         audio_data: np.ndarray,
         sample_rate: int,
         block_ms: int = 50,
         silence_threshold: float = 0.01,
-        min_silence_duration_ms: int = 500,
     ) -> np.ndarray:
         """
-        Trim trailing silence from audio data.
-        
-        Uses a sliding window to detect contiguous blocks of near-silence
-        (low mean and low variance) at the end of the audio.
+        Trim silence from the beginning and end of audio.
         
         Args:
             audio_data: Audio samples as numpy array
             sample_rate: Sample rate in Hz
-            block_ms: Block size in milliseconds for analysis (default 50ms)
-            silence_threshold: Max RMS amplitude to consider as silence (default 0.01)
-            min_silence_duration_ms: Minimum silence duration to trigger trimming (default 500ms)
+            block_ms: Block size in milliseconds for analysis
+            silence_threshold: Max RMS amplitude to consider as silence
         
         Returns:
-            Audio data with trailing silence removed
+            Audio data with leading and trailing silence removed
         """
         if len(audio_data) == 0:
             return audio_data
@@ -273,46 +268,175 @@ class AudioProcessor:
             audio_data = np.mean(audio_data, axis=1)
         
         block_samples = int(sample_rate * block_ms / 1000)
-        min_silence_samples = int(sample_rate * min_silence_duration_ms / 1000)
-        min_silence_blocks = max(1, min_silence_samples // block_samples)
-        
         total_blocks = len(audio_data) // block_samples
+        
         if total_blocks == 0:
-            return audio_data
+            return audio_data.astype(np.float32)
         
-        # Analyze blocks from the end
-        silence_start_block = None
-        consecutive_silence = 0
+        # Find first non-silent block (from start)
+        first_sound_block = 0
+        for i in range(total_blocks):
+            start_idx = i * block_samples
+            end_idx = min(start_idx + block_samples, len(audio_data))
+            block = audio_data[start_idx:end_idx]
+            rms = np.sqrt(np.mean(block ** 2))
+            if rms >= silence_threshold:
+                first_sound_block = i
+                break
+        else:
+            # All silence
+            return np.array([], dtype=np.float32)
         
+        # Find last non-silent block (from end)
+        last_sound_block = total_blocks - 1
         for i in range(total_blocks - 1, -1, -1):
             start_idx = i * block_samples
             end_idx = min(start_idx + block_samples, len(audio_data))
             block = audio_data[start_idx:end_idx]
-            
-            # Calculate RMS (root mean square) for the block
             rms = np.sqrt(np.mean(block ** 2))
-            
-            # Check if this block is silence
+            if rms >= silence_threshold:
+                last_sound_block = i
+                break
+        
+        # Extract the audio between first and last sound blocks
+        start_sample = first_sound_block * block_samples
+        end_sample = min((last_sound_block + 1) * block_samples, len(audio_data))
+        
+        return audio_data[start_sample:end_sample].astype(np.float32)
+    
+    def truncate_at_long_silence(
+        self,
+        audio_data: np.ndarray,
+        sample_rate: int,
+        block_ms: int = 50,
+        silence_threshold: float = 0.01,
+        long_silence_ms: int = 2000,
+    ) -> np.ndarray:
+        """
+        Scan for 2+ seconds of contiguous silence and truncate everything after.
+        
+        This catches TTS model hallucinations that sometimes appear after
+        a long pause. If we find 2+ seconds of silence followed by more audio,
+        we truncate at the start of that silence.
+        
+        Args:
+            audio_data: Audio samples as numpy array
+            sample_rate: Sample rate in Hz
+            block_ms: Block size in milliseconds for analysis
+            silence_threshold: Max RMS amplitude to consider as silence
+            long_silence_ms: Duration of silence that triggers truncation (default 2000ms)
+        
+        Returns:
+            Audio data truncated at first occurrence of long silence
+        """
+        if len(audio_data) == 0:
+            return audio_data
+        
+        # Convert to mono if stereo
+        if len(audio_data.shape) > 1:
+            audio_data = np.mean(audio_data, axis=1)
+        
+        block_samples = int(sample_rate * block_ms / 1000)
+        long_silence_blocks = max(1, int(long_silence_ms / block_ms))
+        total_blocks = len(audio_data) // block_samples
+        
+        if total_blocks == 0:
+            return audio_data.astype(np.float32)
+        
+        # Calculate RMS for each block
+        block_rms = []
+        for i in range(total_blocks):
+            start_idx = i * block_samples
+            end_idx = min(start_idx + block_samples, len(audio_data))
+            block = audio_data[start_idx:end_idx]
+            rms = np.sqrt(np.mean(block ** 2))
+            block_rms.append(rms)
+        
+        # Scan for contiguous silence of 2+ seconds
+        consecutive_silence = 0
+        silence_start_block = None
+        
+        for i, rms in enumerate(block_rms):
             is_silence = rms < silence_threshold
             
             if is_silence:
+                if consecutive_silence == 0:
+                    silence_start_block = i
                 consecutive_silence += 1
-                silence_start_block = i
-            else:
-                # Found non-silence, check if we had enough silence after this
-                if consecutive_silence >= min_silence_blocks:
-                    # Trim from silence_start_block
+                
+                # Found long silence - truncate at start of this silence
+                if consecutive_silence >= long_silence_blocks and silence_start_block is not None:
                     trim_point = silence_start_block * block_samples
                     return audio_data[:trim_point].astype(np.float32)
-                else:
-                    # Not enough silence, keep everything
-                    return audio_data.astype(np.float32)
+            else:
+                # Reset silence counter
+                consecutive_silence = 0
+                silence_start_block = None
         
-        # If we get here, the entire audio (or most of it) is silence
-        # Keep at least some audio if it exists
-        if consecutive_silence >= min_silence_blocks and silence_start_block is not None:
-            trim_point = silence_start_block * block_samples
-            if trim_point > 0:
-                return audio_data[:trim_point].astype(np.float32)
-        
+        # No long silence found, return original
         return audio_data.astype(np.float32)
+    
+    def aggressive_silence_trim(
+        self,
+        audio_data: np.ndarray,
+        sample_rate: int,
+        block_ms: int = 50,
+        silence_threshold: float = 0.01,
+        long_silence_ms: int = 2000,
+    ) -> np.ndarray:
+        """
+        Aggressively trim silence from audio in two passes:
+        
+        1. First, scan for 2+ seconds of contiguous silence and truncate
+           everything after that point (catches model hallucinations)
+        2. Then trim any remaining silence from beginning and end
+        
+        Args:
+            audio_data: Audio samples as numpy array
+            sample_rate: Sample rate in Hz
+            block_ms: Block size in milliseconds for analysis (default 50ms)
+            silence_threshold: Max RMS amplitude to consider as silence (default 0.01)
+            long_silence_ms: Duration of silence that triggers truncation (default 2000ms)
+        
+        Returns:
+            Audio data with aggressive silence removal applied
+        """
+        if len(audio_data) == 0:
+            return audio_data
+        
+        # Pass 1: Truncate at first occurrence of 2+ second silence
+        audio_data = self.truncate_at_long_silence(
+            audio_data, sample_rate, block_ms, silence_threshold, long_silence_ms
+        )
+        
+        # Pass 2: Trim remaining silence from edges
+        audio_data = self.trim_silence_edges(
+            audio_data, sample_rate, block_ms, silence_threshold
+        )
+        
+        return audio_data
+    
+    def trim_trailing_silence(
+        self,
+        audio_data: np.ndarray,
+        sample_rate: int,
+        block_ms: int = 50,
+        silence_threshold: float = 0.01,
+        min_silence_duration_ms: int = 500,
+    ) -> np.ndarray:
+        """
+        Legacy method - now redirects to aggressive_silence_trim for better results.
+        
+        Args:
+            audio_data: Audio samples as numpy array
+            sample_rate: Sample rate in Hz
+            block_ms: Block size in milliseconds for analysis (default 50ms)
+            silence_threshold: Max RMS amplitude to consider as silence (default 0.01)
+            min_silence_duration_ms: Ignored - uses 2000ms for long silence detection
+        
+        Returns:
+            Audio data with aggressive silence removal applied
+        """
+        return self.aggressive_silence_trim(
+            audio_data, sample_rate, block_ms, silence_threshold, long_silence_ms=2000
+        )
