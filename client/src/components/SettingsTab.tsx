@@ -181,7 +181,7 @@ export function SettingsTab() {
 
   const getVoiceOptions = () => {
     if (defaultEngine === "edge-tts" && edgeVoicesData?.voices) {
-      return edgeVoicesData.voices.slice(0, 50).map((v) => ({
+      return edgeVoicesData.voices.map((v) => ({
         value: `edge:${v.id}`,
         label: `${v.name} (${v.gender})`,
       }));
@@ -193,7 +193,7 @@ export function SettingsTab() {
       }));
     }
     if ((defaultEngine === "chatterbox-free" || defaultEngine === "chatterbox-paid") && libraryVoicesData) {
-      return libraryVoicesData.slice(0, 50).map((v) => ({
+      return libraryVoicesData.map((v) => ({
         value: `library:${v.id}`,
         label: v.name,
       }));
@@ -234,6 +234,7 @@ export function SettingsTab() {
             <div className="space-y-2">
               <Label htmlFor="default-voice">Default Voice</Label>
               <Select 
+                key={`voice-select-${defaultEngine}`}
                 value={defaultVoice} 
                 onValueChange={handleVoiceChange}
                 disabled={voiceOptions.length === 0}
