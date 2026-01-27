@@ -13,8 +13,8 @@ CHATTERBOX_PAID_CONFIG = {
     # API key for authentication (optional, for private spaces)
     "api_key": os.environ.get("CHATTERBOX_API_KEY", ""),
     
-    # Request timeout in seconds
-    "timeout": int(os.environ.get("CHATTERBOX_TIMEOUT", "120")),
+    # Request timeout in seconds (300s = 5 min default for TTS generation)
+    "timeout": int(os.environ.get("CHATTERBOX_TIMEOUT", "300")),
     
     # Maximum characters per request (0 = no limit)
     "max_chars": int(os.environ.get("CHATTERBOX_MAX_CHARS", "0")),
