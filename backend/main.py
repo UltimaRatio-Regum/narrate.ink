@@ -425,6 +425,140 @@ async def generate_audio_stream(request: GenerateRequest):
     )
 
 
+from database import init_database
+from job_manager import (
+    create_job, get_job, get_all_jobs, get_job_segments, 
+    get_segment_audio, cancel_job, delete_job
+)
+from job_runner import start_job_async
+
+init_database()
+
+
+class CreateJobRequest(BaseModel):
+    title: str = "Untitled"
+    segments: list
+    config: dict
+
+
+@app.post("/jobs")
+async def create_tts_job(request: CreateJobRequest):
+    """Create a new TTS generation job."""
+    try:
+        job_id = create_job(
+            title=request.title,
+            segments=request.segments,
+            config=request.config,
+        )
+        
+        start_job_async(job_id)
+        
+        return {"jobId": job_id, "status": "pending"}
+    except Exception as e:
+        logger.error(f"Failed to create job: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/jobs")
+async def list_jobs(include_completed: bool = True, limit: int = 50):
+    """List all TTS jobs."""
+    try:
+        jobs = get_all_jobs(include_completed=include_completed, limit=limit)
+        return {"jobs": jobs}
+    except Exception as e:
+        logger.error(f"Failed to list jobs: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/jobs/{job_id}")
+async def get_job_status(job_id: str):
+    """Get status of a TTS job."""
+    job = get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
+
+
+@app.get("/jobs/{job_id}/segments")
+async def get_job_segments_endpoint(job_id: str, completed_only: bool = False):
+    """Get segments for a job."""
+    job = get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    segments = get_job_segments(job_id, completed_only=completed_only)
+    return {"segments": segments}
+
+
+@app.get("/jobs/{job_id}/segments/{segment_id}/audio")
+async def get_segment_audio_endpoint(job_id: str, segment_id: str):
+    """Get audio for a specific segment."""
+    from fastapi.responses import Response
+    
+    audio_data = get_segment_audio(segment_id)
+    if not audio_data:
+        raise HTTPException(status_code=404, detail="Audio not found")
+    
+    return Response(
+        content=audio_data,
+        media_type="audio/mpeg",
+        headers={"Content-Disposition": f"inline; filename=segment_{segment_id}.mp3"}
+    )
+
+
+@app.post("/jobs/{job_id}/cancel")
+async def cancel_job_endpoint(job_id: str):
+    """Cancel a running job."""
+    job = get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    cancel_job(job_id)
+    return {"status": "cancelled"}
+
+
+@app.delete("/jobs/{job_id}")
+async def delete_job_endpoint(job_id: str):
+    """Delete a job and its segments."""
+    if delete_job(job_id):
+        return {"status": "deleted"}
+    raise HTTPException(status_code=404, detail="Job not found")
+
+
+@app.get("/jobs/{job_id}/audio")
+async def get_combined_audio(job_id: str):
+    """Get combined audio for all completed segments."""
+    from fastapi.responses import Response
+    from pydub import AudioSegment as PydubSegment
+    import io
+    
+    job = get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    segments = get_job_segments(job_id, completed_only=True)
+    if not segments:
+        raise HTTPException(status_code=404, detail="No completed segments")
+    
+    combined = PydubSegment.empty()
+    pause = PydubSegment.silent(duration=500)
+    
+    for seg in sorted(segments, key=lambda s: s["segmentIndex"]):
+        audio_data = get_segment_audio(seg["id"])
+        if audio_data:
+            segment_audio = PydubSegment.from_file(io.BytesIO(audio_data), format="mp3")
+            combined += segment_audio + pause
+    
+    buffer = io.BytesIO()
+    combined.export(buffer, format="mp3", bitrate="192k")
+    
+    return Response(
+        content=buffer.getvalue(),
+        media_type="audio/mpeg",
+        headers={"Content-Disposition": f"attachment; filename=audiobook_{job_id}.mp3"}
+    )
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -1,0 +1,119 @@
+"""
+Database configuration and models for TTS job persistence.
+Uses SQLAlchemy with asyncpg for async PostgreSQL operations.
+"""
+import os
+import uuid
+from datetime import datetime
+from typing import Optional, List
+from enum import Enum
+
+from sqlalchemy import (
+    Column, String, Integer, Float, DateTime, Text, ForeignKey, 
+    Enum as SQLEnum, LargeBinary, create_engine
+)
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, relationship
+from sqlalchemy.pool import StaticPool
+
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
+
+Base = declarative_base()
+
+
+class JobStatus(str, Enum):
+    PENDING = "pending"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class SegmentStatus(str, Enum):
+    PENDING = "pending"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class TTSJob(Base):
+    """Represents a TTS generation job that processes multiple segments."""
+    __tablename__ = "tts_jobs"
+    
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    title = Column(String, nullable=False, default="Untitled")
+    status = Column(String, nullable=False, default=JobStatus.PENDING.value)
+    total_segments = Column(Integer, nullable=False, default=0)
+    completed_segments = Column(Integer, nullable=False, default=0)
+    failed_segments = Column(Integer, nullable=False, default=0)
+    tts_engine = Column(String, nullable=False, default="edge-tts")
+    narrator_voice_id = Column(String, nullable=True)
+    error_message = Column(Text, nullable=True)
+    config_json = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    segments = relationship("TTSSegment", back_populates="job", cascade="all, delete-orphan")
+
+
+class TTSSegment(Base):
+    """Represents a single segment within a TTS job."""
+    __tablename__ = "tts_segments"
+    
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    job_id = Column(String, ForeignKey("tts_jobs.id", ondelete="CASCADE"), nullable=False)
+    segment_index = Column(Integer, nullable=False)
+    text = Column(Text, nullable=False)
+    segment_type = Column(String, nullable=False, default="narration")
+    speaker = Column(String, nullable=True)
+    sentiment = Column(String, nullable=True)
+    status = Column(String, nullable=False, default=SegmentStatus.PENDING.value)
+    audio_path = Column(String, nullable=True)
+    audio_data = Column(LargeBinary, nullable=True)
+    duration_seconds = Column(Float, nullable=True)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    job = relationship("TTSJob", back_populates="segments")
+
+
+engine = None
+SessionLocal = None
+
+
+def init_database():
+    """Initialize the database connection and create tables."""
+    global engine, SessionLocal
+    
+    if not DATABASE_URL:
+        print("WARNING: DATABASE_URL not set, using in-memory SQLite")
+        engine = create_engine(
+            "sqlite:///:memory:",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool
+        )
+    else:
+        engine = create_engine(DATABASE_URL)
+    
+    Base.metadata.create_all(bind=engine)
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    return engine
+
+
+def get_db():
+    """Get a database session."""
+    if SessionLocal is None:
+        init_database()
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+def get_db_session():
+    """Get a database session directly (not as generator)."""
+    if SessionLocal is None:
+        init_database()
+    return SessionLocal()
