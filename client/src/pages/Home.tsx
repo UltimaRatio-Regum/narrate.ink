@@ -1,24 +1,23 @@
-import { BookAudio, Upload, Sliders, List, Settings } from "lucide-react";
+import { Upload, Sliders, List, Settings } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { BeginnerTab } from "@/components/BeginnerTab";
 import { AdvancedTab } from "@/components/AdvancedTab";
 import { JobsPanel } from "@/components/JobsPanel";
 import { SettingsTab } from "@/components/SettingsTab";
+import logoHorizontal from "@assets/vl_full_logo_horizontal.png";
 
 export default function Home() {
   return (
     <div className="min-h-screen bg-background">
       <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="container flex h-16 items-center justify-between gap-4 px-4 mx-auto">
-          <div className="flex items-center gap-3">
-            <div className="flex items-center justify-center h-10 w-10 rounded-md bg-primary text-primary-foreground">
-              <BookAudio className="h-5 w-5" />
-            </div>
-            <div>
-              <h1 className="text-lg font-semibold">VoxLibris</h1>
-              <p className="text-xs text-muted-foreground hidden sm:block">Text to Audiobook Generator</p>
-            </div>
+          <div className="flex items-center">
+            <img 
+              src={logoHorizontal} 
+              alt="VoxLibris" 
+              className="h-10 w-auto"
+            />
           </div>
           <ThemeToggle />
         </div>
