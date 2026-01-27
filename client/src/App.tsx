@@ -18,7 +18,7 @@ function Router() {
 
 function App() {
   return (
-    <ThemeProvider defaultTheme="dark" storageKey="narrator-ai-theme">
+    <ThemeProvider defaultTheme="dark" storageKey="voxlibris-theme">
       <QueryClientProvider client={queryClient}>
         <TooltipProvider>
           <Toaster />

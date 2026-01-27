@@ -16,7 +16,7 @@ export default function Home() {
               <BookAudio className="h-5 w-5" />
             </div>
             <div>
-              <h1 className="text-lg font-semibold">Narrator AI</h1>
+              <h1 className="text-lg font-semibold">VoxLibris</h1>
               <p className="text-xs text-muted-foreground hidden sm:block">Text to Audiobook Generator</p>
             </div>
           </div>

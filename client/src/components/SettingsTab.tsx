@@ -91,10 +91,10 @@ export function SettingsTab() {
   const queryClient = useQueryClient();
 
   const [defaultEngine, setDefaultEngine] = useState(() => 
-    localStorage.getItem("narrator-default-engine") || "edge-tts"
+    localStorage.getItem("voxlibris-default-engine") || "edge-tts"
   );
   const [defaultVoice, setDefaultVoice] = useState(() =>
-    localStorage.getItem("narrator-default-voice") || ""
+    localStorage.getItem("voxlibris-default-voice") || ""
   );
   const [localProsody, setLocalProsody] = useState<ProsodySettings | null>(null);
 
@@ -145,13 +145,13 @@ export function SettingsTab() {
   const handleEngineChange = (engine: string) => {
     setDefaultEngine(engine);
     setDefaultVoice("");
-    localStorage.setItem("narrator-default-engine", engine);
-    localStorage.removeItem("narrator-default-voice");
+    localStorage.setItem("voxlibris-default-engine", engine);
+    localStorage.removeItem("voxlibris-default-voice");
   };
 
   const handleVoiceChange = (voice: string) => {
     setDefaultVoice(voice);
-    localStorage.setItem("narrator-default-voice", voice);
+    localStorage.setItem("voxlibris-default-voice", voice);
   };
 
   const handleProsodyChange = (emotion: string, field: "pitch" | "speed" | "volume" | "intensity", value: string) => {

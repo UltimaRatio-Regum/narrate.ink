@@ -36,13 +36,13 @@ export function BeginnerTab() {
 
   const [step, setStep] = useState<WizardStep>("upload");
   const [ttsEngine, setTTSEngine] = useState<TTSEngine>(() => {
-    const saved = localStorage.getItem("narrator-default-engine");
+    const saved = localStorage.getItem("voxlibris-default-engine");
     return (saved as TTSEngine) || "edge-tts";
   });
   const [currentUploadId, setCurrentUploadId] = useState<string | null>(null);
   const [voiceMode, setVoiceMode] = useState<"single" | "characters">("single");
   const [singleVoice, setSingleVoice] = useState<string>(() => {
-    return localStorage.getItem("narrator-default-voice") || "edge:en-US-AriaNeural";
+    return localStorage.getItem("voxlibris-default-voice") || "edge:en-US-AriaNeural";
   });
   const [characterVoices, setCharacterVoices] = useState<Record<string, string>>({});
 
