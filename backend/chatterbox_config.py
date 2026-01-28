@@ -3,6 +3,28 @@ Configuration for Chatterbox TTS paid API.
 Update these settings when using a custom Chatterbox endpoint.
 """
 import os
+import json
+from pathlib import Path
+
+TTS_SETTINGS_FILE = Path(__file__).parent.parent / "tts_settings.json"
+
+def load_tts_settings():
+    """Load TTS settings from file."""
+    defaults = {
+        "chatterbox_model": "qwen3",
+        "st_alpha": 0.3,
+        "st_beta": 0.7,
+        "st_diffusion_steps": 5,
+        "st_embedding_scale": 1.0,
+    }
+    if TTS_SETTINGS_FILE.exists():
+        try:
+            with open(TTS_SETTINGS_FILE, 'r') as f:
+                saved = json.load(f)
+                defaults.update(saved)
+        except Exception:
+            pass
+    return defaults
 
 # Chatterbox Paid API Configuration (HuggingFace Space via Gradio)
 # Supports multiple TTS backends: chatterbox, xtts_v2, styletts2, qwen3

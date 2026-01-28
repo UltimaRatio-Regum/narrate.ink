@@ -1175,6 +1175,65 @@ async def update_prosody_settings(request: ProsodySettingsRequest):
     }
 
 
+TTS_SETTINGS_FILE = Path(__file__).parent.parent / "tts_settings.json"
+
+def load_tts_settings():
+    """Load TTS settings from file."""
+    import json
+    defaults = {
+        "chatterbox_model": "qwen3",
+        "st_alpha": 0.3,
+        "st_beta": 0.7,
+        "st_diffusion_steps": 5,
+        "st_embedding_scale": 1.0,
+    }
+    if TTS_SETTINGS_FILE.exists():
+        try:
+            with open(TTS_SETTINGS_FILE, 'r') as f:
+                saved = json.load(f)
+                defaults.update(saved)
+        except Exception as e:
+            logger.warning(f"Failed to load TTS settings: {e}")
+    return defaults
+
+def save_tts_settings(settings: dict):
+    """Save TTS settings to file."""
+    import json
+    try:
+        with open(TTS_SETTINGS_FILE, 'w') as f:
+            json.dump(settings, f, indent=2)
+    except Exception as e:
+        logger.warning(f"Failed to save TTS settings: {e}")
+
+
+class TTSSettingsRequest(BaseModel):
+    chatterbox_model: str = "qwen3"
+    st_alpha: float = 0.3
+    st_beta: float = 0.7
+    st_diffusion_steps: int = 5
+    st_embedding_scale: float = 1.0
+
+
+@app.get("/tts-settings")
+async def get_tts_settings():
+    """Get the current TTS model settings."""
+    return load_tts_settings()
+
+
+@app.post("/tts-settings")
+async def update_tts_settings(request: TTSSettingsRequest):
+    """Update the TTS model settings."""
+    settings = {
+        "chatterbox_model": request.chatterbox_model,
+        "st_alpha": max(0, min(1, request.st_alpha)),
+        "st_beta": max(0, min(1, request.st_beta)),
+        "st_diffusion_steps": max(1, min(20, request.st_diffusion_steps)),
+        "st_embedding_scale": max(0.5, min(2, request.st_embedding_scale)),
+    }
+    save_tts_settings(settings)
+    return {"success": True, **settings}
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

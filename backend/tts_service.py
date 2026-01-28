@@ -323,7 +323,7 @@ class TTSService:
         Returns MP3 audio which is decoded to numpy array.
         Raises exceptions on failure (no fallbacks).
         """
-        from chatterbox_config import CHATTERBOX_PAID_CONFIG, is_paid_chatterbox_configured
+        from chatterbox_config import CHATTERBOX_PAID_CONFIG, is_paid_chatterbox_configured, load_tts_settings
         from gradio_client import Client, handle_file
         import soundfile as sf
         import io
@@ -353,17 +353,20 @@ class TTSService:
             api_key = config.get("api_key", "")
             timeout_secs = config.get("timeout", 120)
             
-            # Multi-model parameters
-            model = config.get("model", "qwen3")
+            # Load dynamic settings from tts_settings.json (set via Settings tab)
+            tts_settings = load_tts_settings()
+            
+            # Multi-model parameters - prefer tts_settings.json, fallback to env vars
+            model = tts_settings.get("chatterbox_model", config.get("model", "qwen3"))
             language = config.get("language", "English")
             qwen_model_id = config.get("qwen_model_id", "Qwen/Qwen3-TTS-12Hz-0.6B-Base")
             qwen_x_vector_only_mode = config.get("qwen_x_vector_only_mode", False)
             
-            # StyleTTS2 parameters
-            st_alpha = config.get("st_alpha", 0.3)
-            st_beta = config.get("st_beta", 0.7)
-            st_diffusion_steps = config.get("st_diffusion_steps", 5)
-            st_embedding_scale = config.get("st_embedding_scale", 1.0)
+            # StyleTTS2 parameters - prefer tts_settings.json
+            st_alpha = tts_settings.get("st_alpha", config.get("st_alpha", 0.3))
+            st_beta = tts_settings.get("st_beta", config.get("st_beta", 0.7))
+            st_diffusion_steps = tts_settings.get("st_diffusion_steps", config.get("st_diffusion_steps", 5))
+            st_embedding_scale = tts_settings.get("st_embedding_scale", config.get("st_embedding_scale", 1.0))
             
             # Try to load voice transcript for VCTK samples (improves Qwen3 quality)
             ref_text = None
