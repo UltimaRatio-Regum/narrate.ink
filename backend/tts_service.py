@@ -353,7 +353,13 @@ class TTSService:
             api_key = config.get("api_key", "")
             timeout_secs = config.get("timeout", 120)
             
-            logger.info(f"Connecting to Chatterbox paid space: {space_url}")
+            # Multi-model parameters
+            model = config.get("model", "qwen3")
+            language = config.get("language", "English")
+            qwen_model_id = config.get("qwen_model_id", "Qwen/Qwen3-TTS-12Hz-0.6B-Base")
+            qwen_x_vector_only_mode = config.get("qwen_x_vector_only_mode", False)
+            
+            logger.info(f"Connecting to Chatterbox paid space: {space_url} (model: {model})")
             
             # Run in executor to avoid blocking
             loop = asyncio.get_running_loop()
@@ -372,11 +378,16 @@ class TTSService:
                 }
                 
                 client = Client(space_url, **client_kwargs)
-                # Call with: text, seed, voice_reference_audio
+                # New multi-model API:
+                # (text, model, language, voice_file, text_prompt, qwen_x_vector_only_mode, qwen_model_id)
                 result = client.predict(
-                    text,
-                    None,  # seed (optional, None for random)
-                    handle_file(voice_path),  # voice reference audio file
+                    text,                           # text to speak
+                    model,                          # model name (e.g., "qwen3", "chatterbox")
+                    language,                       # language (e.g., "English")
+                    handle_file(voice_path),        # voice reference audio file
+                    text,                           # text prompt for voice cloning (use same text)
+                    qwen_x_vector_only_mode,        # qwen_x_vector_only_mode
+                    qwen_model_id,                  # qwen_model_id
                     api_name="/tts_to_mp3"
                 )
                 return result

@@ -23,6 +23,14 @@ CHATTERBOX_PAID_CONFIG = {
     "default_exaggeration": 0.5,
     "default_temperature": 0.8,
     "default_cfg_weight": 0.5,
+    
+    # Multi-model support (qwen3, chatterbox, etc.)
+    "model": os.environ.get("CHATTERBOX_MODEL", "qwen3"),
+    "language": os.environ.get("CHATTERBOX_LANGUAGE", "English"),
+    
+    # Qwen-specific parameters
+    "qwen_model_id": os.environ.get("CHATTERBOX_QWEN_MODEL_ID", "Qwen/Qwen3-TTS-12Hz-0.6B-Base"),
+    "qwen_x_vector_only_mode": os.environ.get("CHATTERBOX_QWEN_X_VECTOR_ONLY", "false").lower() == "true",
 }
 
 # Free HuggingFace Spaces configuration
