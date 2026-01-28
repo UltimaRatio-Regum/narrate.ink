@@ -359,6 +359,29 @@ class TTSService:
             qwen_model_id = config.get("qwen_model_id", "Qwen/Qwen3-TTS-12Hz-0.6B-Base")
             qwen_x_vector_only_mode = config.get("qwen_x_vector_only_mode", False)
             
+            # StyleTTS2 parameters
+            st_alpha = config.get("st_alpha", 0.3)
+            st_beta = config.get("st_beta", 0.7)
+            st_diffusion_steps = config.get("st_diffusion_steps", 5)
+            st_embedding_scale = config.get("st_embedding_scale", 1.0)
+            
+            # Try to load voice transcript for VCTK samples (improves Qwen3 quality)
+            ref_text = None
+            if voice_path and model == "qwen3":
+                transcript_path = voice_path.replace(".wav", ".txt").replace(".flac", ".txt")
+                if os.path.exists(transcript_path):
+                    try:
+                        with open(transcript_path, 'r') as f:
+                            ref_text = f.read().strip()
+                        logger.info(f"Loaded voice transcript: {ref_text[:50]}...")
+                    except Exception as e:
+                        logger.warning(f"Failed to load transcript: {e}")
+                
+                # If no transcript available for Qwen3, use x_vector_only_mode
+                if not ref_text:
+                    qwen_x_vector_only_mode = True
+                    logger.info("No transcript found, enabling qwen_x_vector_only_mode")
+            
             logger.info(f"Connecting to Chatterbox paid space: {space_url} (model: {model})")
             
             # Run in executor to avoid blocking
@@ -378,16 +401,22 @@ class TTSService:
                 }
                 
                 client = Client(space_url, **client_kwargs)
-                # New multi-model API:
-                # (text, model, language, voice_file, text_prompt, qwen_x_vector_only_mode, qwen_model_id)
+                # Multi-model API with all parameters:
+                # (text, backend, language, voice_wav, ref_text, 
+                #  qwen_x_vector_only_mode, qwen_model_id,
+                #  st_alpha, st_beta, st_diffusion_steps, st_embedding_scale)
                 result = client.predict(
                     text,                           # text to speak
-                    model,                          # model name (e.g., "qwen3", "chatterbox")
-                    language,                       # language (e.g., "English")
-                    handle_file(voice_path),        # voice reference audio file
-                    text,                           # text prompt for voice cloning (use same text)
+                    model,                          # backend: chatterbox, xtts_v2, styletts2, qwen3
+                    language,                       # language (e.g., "English", "en")
+                    handle_file(voice_path),        # voice_wav: reference audio file
+                    ref_text,                       # ref_text: transcript of voice sample (Qwen3)
                     qwen_x_vector_only_mode,        # qwen_x_vector_only_mode
                     qwen_model_id,                  # qwen_model_id
+                    st_alpha,                       # StyleTTS2: voice style strength
+                    st_beta,                        # StyleTTS2: prosody emphasis
+                    st_diffusion_steps,             # StyleTTS2: diffusion steps
+                    st_embedding_scale,             # StyleTTS2: speaker identity scale
                     api_name="/tts_to_mp3"
                 )
                 return result

@@ -1,0 +1,317 @@
+Absolutely — here is a clean, Replit-friendly documentation block you can paste directly into your project or give to Replit as context. It explains the /tts Gradio API parameters and how they map to each model backend.
+
+⸻
+
+VoxLibris TTS API — Parameter Documentation
+
+VoxLibris exposes a single Gradio API endpoint:
+	•	API name: tts_to_mp3
+	•	Returns: MP3 audio file (path or downloadable blob)
+
+This endpoint supports multiple TTS backends:
+	•	chatterbox
+	•	xtts_v2
+	•	styletts2
+	•	qwen3
+
+The caller chooses a backend and optionally provides voice-cloning input.
+
+⸻
+
+Function Signature
+
+The Gradio function is called as:
+
+client.predict(
+    text,
+    backend,
+    language,
+    voice_wav,
+    ref_text,
+    qwen_x_vector_only_mode,
+    qwen_model_id,
+    st_alpha,
+    st_beta,
+    st_diffusion_steps,
+    st_embedding_scale,
+    api_name="tts_to_mp3"
+)
+
+
+⸻
+
+Parameter Reference
+
+1. text (string, required)
+
+The text to synthesize.
+
+Example:
+
+"Hello, this is an audiobook narration demo."
+
+
+⸻
+
+2. backend (string, required)
+
+Selects which TTS engine to use.
+
+Allowed values:
+
+Backend Name	Description
+chatterbox	Fast open-source expressive narration
+xtts_v2	Coqui XTTS v2 multilingual voice cloning
+styletts2	StyleTTS2 diffusion-based high-quality voice model
+qwen3	Qwen3-TTS voice cloning model
+
+Example:
+
+backend="qwen3"
+
+
+⸻
+
+3. language (string, optional)
+
+Language identifier used by the backend.
+	•	Chatterbox: usually "en"
+	•	XTTS: "en", "fr", "es", etc.
+	•	Qwen3: "English" or "Chinese"
+
+Examples:
+
+language="en"
+language="English"
+
+
+⸻
+
+4. voice_wav (file upload, optional)
+
+Optional reference WAV file for voice cloning.
+
+Used by:
+	•	✅ Chatterbox (optional)
+	•	✅ XTTS v2 (required)
+	•	✅ StyleTTS2 (optional)
+	•	✅ Qwen3 (required)
+
+In gradio_client, pass:
+
+handle_file("voice.wav")
+
+Example:
+
+voice_wav=handle_file("speaker.wav")
+
+
+⸻
+
+5. ref_text (string, optional)
+
+Optional transcript of the reference WAV.
+
+Only meaningful for:
+	•	✅ Qwen3 voice cloning
+
+Qwen3 performs best when given both:
+	•	reference audio
+	•	the text spoken in the reference audio
+
+Example:
+
+ref_text="These take the shape of a long round arch..."
+
+If omitted, Qwen3 requires x_vector_only_mode=True.
+
+⸻
+
+6. qwen_x_vector_only_mode (bool, optional)
+
+Controls whether Qwen3 can clone a voice without needing the transcript.
+
+Value	Meaning
+False	Transcript required (ref_text must be provided)
+True	Transcript not required (may reduce quality slightly)
+
+Example:
+
+qwen_x_vector_only_mode=True
+
+
+⸻
+
+7. qwen_model_id (string, optional)
+
+Specifies which Qwen3-TTS checkpoint to use.
+
+Default:
+
+"Qwen/Qwen3-TTS-12Hz-0.6B-Base"
+
+Example:
+
+qwen_model_id="Qwen/Qwen3-TTS-12Hz-0.6B-Base"
+
+
+⸻
+
+StyleTTS2 Parameters (only used when backend=“styletts2”)
+
+These control expressiveness and diffusion strength.
+
+⸻
+
+8. st_alpha (float, default=0.3)
+
+Controls voice style strength.
+
+Higher → more stylized speech.
+
+Example:
+
+st_alpha=0.4
+
+
+⸻
+
+9. st_beta (float, default=0.7)
+
+Controls prosody emphasis.
+
+Higher → stronger emotion.
+
+Example:
+
+st_beta=0.8
+
+
+⸻
+
+10. st_diffusion_steps (int, default=5)
+
+Number of diffusion refinement steps.
+
+Higher → better quality but slower.
+
+Example:
+
+st_diffusion_steps=8
+
+
+⸻
+
+11. st_embedding_scale (float, default=1.0)
+
+Strength of speaker identity embedding.
+
+Higher → closer match to reference voice.
+
+Example:
+
+st_embedding_scale=1.2
+
+
+⸻
+
+Example Calls
+
+⸻
+
+Chatterbox (default)
+
+client.predict(
+    "Hello from VoxLibris.",
+    "chatterbox",
+    "en",
+    None,
+    None,
+    False,
+    None,
+    0.3, 0.7, 5, 1.0,
+    api_name="tts_to_mp3"
+)
+
+
+⸻
+
+XTTS v2 (cloning)
+
+client.predict(
+    "Hello from XTTS voice cloning.",
+    "xtts_v2",
+    "en",
+    handle_file("voice.wav"),
+    None,
+    False,
+    None,
+    0.3, 0.7, 5, 1.0,
+    api_name="tts_to_mp3"
+)
+
+
+⸻
+
+StyleTTS2 (emotional)
+
+client.predict(
+    "StyleTTS2 expressive narration.",
+    "styletts2",
+    "en",
+    handle_file("voice.wav"),
+    None,
+    False,
+    None,
+    0.4, 0.8, 8, 1.2,
+    api_name="tts_to_mp3"
+)
+
+
+⸻
+
+Qwen3 (with transcript)
+
+client.predict(
+    "Hello from Qwen3 cloning.",
+    "qwen3",
+    "English",
+    handle_file("voice.wav"),
+    "These take the shape of a long round arch...",
+    False,
+    "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
+    0.3, 0.7, 5, 1.0,
+    api_name="tts_to_mp3"
+)
+
+
+⸻
+
+Qwen3 (no transcript)
+
+client.predict(
+    "Hello from Qwen3 x-vector only.",
+    "qwen3",
+    "English",
+    handle_file("voice.wav"),
+    None,
+    True,
+    "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
+    0.3, 0.7, 5, 1.0,
+    api_name="tts_to_mp3"
+)
+
+
+⸻
+
+Notes for Implementation
+	•	Only the relevant parameters are used depending on backend.
+	•	Extra parameters are ignored safely.
+	•	Voice cloning works best with:
+	•	≥5 seconds of clean speech
+	•	minimal background noise
+	•	matching transcript (for Qwen3)
+
+⸻
+
+If you paste your client.view_api() output, I can rewrite this documentation with the exact argument order your deployed Space exposes (so Replit will implement it perfectly).
