@@ -55,6 +55,9 @@ const TTS_ENGINES = [
   { value: "openai", label: "OpenAI TTS" },
   { value: "chatterbox-free", label: "Chatterbox Free" },
   { value: "chatterbox-paid", label: "Chatterbox Paid" },
+  { value: "qwen3-tts", label: "Qwen3 TTS (Best Quality)" },
+  { value: "styletts2", label: "StyleTTS2 (Expressive)" },
+  { value: "xtts-v2", label: "XTTS v2 (Multilingual)" },
   { value: "piper", label: "Piper TTS" },
   { value: "soprano", label: "Soprano TTS" },
 ];
@@ -172,9 +175,11 @@ export function SettingsTab() {
     enabled: defaultEngine === "openai",
   });
 
+  const isVoiceCloningEngine = ["chatterbox-free", "chatterbox-paid", "qwen3-tts", "styletts2", "xtts-v2"].includes(defaultEngine);
+  
   const { data: libraryVoicesData } = useQuery<LibraryVoice[]>({
     queryKey: ["/api/voice-library"],
-    enabled: defaultEngine === "chatterbox-free" || defaultEngine === "chatterbox-paid",
+    enabled: isVoiceCloningEngine,
   });
 
   useEffect(() => {
@@ -321,7 +326,7 @@ export function SettingsTab() {
         label: `${v.name} - ${v.description}`,
       }));
     }
-    if ((defaultEngine === "chatterbox-free" || defaultEngine === "chatterbox-paid") && libraryVoicesData) {
+    if (isVoiceCloningEngine && libraryVoicesData) {
       return libraryVoicesData.map((v) => ({
         value: `library:${v.id}`,
         label: v.name,

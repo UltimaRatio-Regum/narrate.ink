@@ -168,7 +168,7 @@ class TTSService:
                     voice_path = voice_files.get(voice_id)
             
             exaggeration = config.defaultExaggeration
-            is_chatterbox = config.ttsEngine in ("chatterbox", "chatterbox-free", "chatterbox-paid")
+            is_chatterbox = config.ttsEngine in ("chatterbox", "chatterbox-free", "chatterbox-paid", "qwen3-tts", "styletts2", "xtts-v2")
             if is_chatterbox and segment.sentiment:
                 exaggeration = get_sentiment_exaggeration(
                     segment.sentiment.label,
@@ -267,6 +267,12 @@ class TTSService:
             return await self._generate_with_chatterbox_free(text, voice_path, exaggeration)
         elif tts_engine == "chatterbox-paid":
             return await self._generate_with_chatterbox_paid(text, voice_path, exaggeration)
+        elif tts_engine == "qwen3-tts":
+            return await self._generate_with_chatterbox_paid(text, voice_path, exaggeration, model_override="qwen3")
+        elif tts_engine == "styletts2":
+            return await self._generate_with_chatterbox_paid(text, voice_path, exaggeration, model_override="styletts2")
+        elif tts_engine == "xtts-v2":
+            return await self._generate_with_chatterbox_paid(text, voice_path, exaggeration, model_override="xtts_v2")
         elif tts_engine == "openai":
             # Use passed openai_voice, fallback to default if invalid
             voice = OPENAI_TTS_VOICES.get(openai_voice, OPENAI_TTS_VOICES["default"]) if openai_voice else "alloy"
@@ -316,6 +322,7 @@ class TTSService:
         text: str,
         voice_path: Optional[str] = None,
         exaggeration: float = 0.5,
+        model_override: Optional[str] = None,
     ) -> np.ndarray:
         """
         Generate audio using Chatterbox TTS via custom HuggingFace Space (Gradio client).
@@ -356,8 +363,12 @@ class TTSService:
             # Load dynamic settings from tts_settings.json (set via Settings tab)
             tts_settings = load_tts_settings()
             
-            # Multi-model parameters - prefer tts_settings.json, fallback to env vars
-            model = tts_settings.get("chatterbox_model", config.get("model", "qwen3"))
+            # Multi-model parameters - use override if provided, else prefer tts_settings.json
+            if model_override:
+                model = model_override
+                logger.info(f"Using model override: {model}")
+            else:
+                model = tts_settings.get("chatterbox_model", config.get("model", "qwen3"))
             language = config.get("language", "English")
             qwen_model_id = config.get("qwen_model_id", "Qwen/Qwen3-TTS-12Hz-0.6B-Base")
             qwen_x_vector_only_mode = config.get("qwen_x_vector_only_mode", False)
