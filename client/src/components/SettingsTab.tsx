@@ -55,6 +55,7 @@ const TTS_ENGINES = [
   { value: "openai", label: "OpenAI TTS" },
   { value: "chatterbox-free", label: "Chatterbox Free" },
   { value: "hf-tts-paid", label: "HuggingFace TTS Paid" },
+  { value: "styletts2", label: "StyleTTS2 (Expressive)" },
   { value: "piper", label: "Piper TTS" },
   { value: "soprano", label: "Soprano TTS" },
 ];
@@ -172,7 +173,7 @@ export function SettingsTab() {
     enabled: defaultEngine === "openai",
   });
 
-  const isVoiceCloningEngine = ["chatterbox-free", "hf-tts-paid"].includes(defaultEngine);
+  const isVoiceCloningEngine = ["chatterbox-free", "hf-tts-paid", "styletts2"].includes(defaultEngine);
   
   const { data: libraryVoicesData } = useQuery<LibraryVoice[]>({
     queryKey: ["/api/voice-library"],

@@ -24,9 +24,12 @@ VoxLibris is a web application designed to transform plain text into expressive 
 - **TTS Engines**:
     - **edge-tts**: High-quality neural TTS (Microsoft Azure), 300+ voices.
     - **Soprano TTS**: Ultra-fast local generation (80M model, 2000x real-time on GPU).
-    - **Chatterbox TTS**: Voice cloning (via HuggingFace Spaces API or local when GPU available), supports emotion-based exaggeration.
+    - **Chatterbox Free**: Voice cloning (via HuggingFace Spaces API), supports emotion-based exaggeration.
+    - **HuggingFace TTS Paid**: Multi-model voice cloning (Qwen3, Chatterbox, XTTS v2, StyleTTS2) with Bearer token auth.
+    - **StyleTTS2**: Standalone expressive TTS via CherithCutestory/styletts2 HF Space, supports emotion control (neutral, happy, sad, angry, fear, excited), native speed/pitch adjustment (no pyrubberband needed).
     - **OpenAI TTS**: Utilizes 6 premium voices.
     - **Piper TTS**: Local TTS engine.
+- **TTS Architecture**: Base class pattern in `backend/tts_engines.py` with unified TTSParams (text, voice_wav, voice_text, voice_id, speed, pitch, emotion, exaggeration). Engine subclasses implement engine-specific logic. EngineFactory creates instances by name.
 - **Audio Processing**: pyrubberband for pitch/speed manipulation, pydub for format conversion, soundfile, numpy, scipy for audio I/O. Aggressive silence trimming for TTS audio (two-pass removal and edge trimming).
 - **Sentiment Analysis**: TextBlob, integrated into LLM output for emotion-based prosody adjustments.
 - **Text Processing**: Smart chunking (sentence endings, colons/semicolons, commas, conjunctions, word-based), dialogue/narration separation, speaker identification using LLMs (e.g., ChatGPT 4o via OpenRouter) with confidence scores, automatic name extraction, and user-provided name hints.

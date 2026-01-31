@@ -168,14 +168,32 @@ class TTSService:
                     voice_path = voice_files.get(voice_id)
             
             exaggeration = config.defaultExaggeration
-            is_chatterbox = config.ttsEngine in ("chatterbox", "chatterbox-free", "chatterbox-paid", "hf-tts-paid")
-            if is_chatterbox and segment.sentiment:
+            is_voice_cloning = config.ttsEngine in ("chatterbox", "chatterbox-free", "chatterbox-paid", "hf-tts-paid", "styletts2")
+            if is_voice_cloning and segment.sentiment:
                 exaggeration = get_sentiment_exaggeration(
                     segment.sentiment.label,
                     segment.sentiment.score,
                     config.defaultExaggeration,
                 )
                 logger.info(f"  Chatterbox exaggeration adjusted to {exaggeration:.2f} for sentiment '{segment.sentiment.label}'")
+            
+            # For StyleTTS2, pass emotion and compute sentiment-derived speed/pitch
+            emotion_label = segment.sentiment.label if segment.sentiment else None
+            
+            # Compute StyleTTS2 speed/pitch including sentiment adjustments
+            styletts2_speed = speed_factor
+            styletts2_pitch = pitch_offset
+            if config.ttsEngine == "styletts2" and segment.sentiment:
+                # Apply sentiment-based adjustments using prosody weights
+                sentiment_adjustments = audio_processor.get_sentiment_prosody_adjustments(
+                    segment.sentiment.label,
+                    segment.sentiment.score,
+                    base_pitch_offset=pitch_offset,
+                    base_speed_factor=speed_factor,
+                )
+                styletts2_speed = sentiment_adjustments.get("speed", speed_factor)
+                styletts2_pitch = sentiment_adjustments.get("pitch", pitch_offset)
+                logger.info(f"  StyleTTS2 sentiment adjustments: speed={styletts2_speed:.2f}, pitch={styletts2_pitch:.2f}")
             
             audio = await self._generate_segment_audio_async(
                 text=segment.text,
@@ -184,9 +202,15 @@ class TTSService:
                 openai_voice=openai_voice if config.ttsEngine == "openai" else None,
                 exaggeration=exaggeration,
                 tts_engine=config.ttsEngine,
+                emotion=emotion_label,
+                speed=styletts2_speed if config.ttsEngine == "styletts2" else 1.0,
+                pitch=styletts2_pitch if config.ttsEngine == "styletts2" else 0.0,
             )
             
-            if segment.sentiment:
+            # Skip prosody post-processing for StyleTTS2 (it handles speed/pitch/emotion natively)
+            if config.ttsEngine == "styletts2":
+                logger.info(f"  StyleTTS2 applied native emotion={emotion_label}, speed={styletts2_speed:.2f}, pitch={styletts2_pitch:.2f}")
+            elif segment.sentiment:
                 logger.info(f"  Applying prosody for sentiment: {segment.sentiment.label} (score: {segment.sentiment.score:.2f})")
                 audio = audio_processor.apply_sentiment_prosody(
                     audio_data=audio,
@@ -254,6 +278,9 @@ class TTSService:
         openai_voice: Optional[str] = "alloy",
         exaggeration: float = 0.5,
         tts_engine: str = "edge-tts",
+        emotion: Optional[str] = None,
+        speed: float = 1.0,
+        pitch: float = 0.0,
     ) -> np.ndarray:
         """
         Generate audio for a single text segment.
@@ -268,6 +295,9 @@ class TTSService:
         elif tts_engine in ("chatterbox-paid", "hf-tts-paid"):
             # HuggingFace TTS Paid - uses model from tts_settings.json
             return await self._generate_with_chatterbox_paid(text, voice_path, exaggeration)
+        elif tts_engine == "styletts2":
+            # StyleTTS2 - standalone HF Space with emotion support and native speed/pitch
+            return await self._generate_with_styletts2(text, voice_path, emotion=emotion, speed=speed, pitch=pitch)
         elif tts_engine == "openai":
             # Use passed openai_voice, fallback to default if invalid
             voice = OPENAI_TTS_VOICES.get(openai_voice, OPENAI_TTS_VOICES["default"]) if openai_voice else "alloy"
@@ -653,6 +683,109 @@ class TTSService:
         finally:
             if os.path.exists(output_path):
                 os.unlink(output_path)
+    
+    async def _generate_with_styletts2(
+        self, 
+        text: str, 
+        voice_path: Optional[str],
+        emotion: Optional[str] = None,
+        speed: float = 1.0,
+        pitch: float = 0.0
+    ) -> np.ndarray:
+        """
+        Generate audio using StyleTTS2 HuggingFace Space (CherithCutestory/styletts2).
+        Supports voice cloning, emotion control, and native speed/pitch adjustment.
+        """
+        from gradio_client import Client, handle_file
+        import httpx
+        import soundfile as sf
+        
+        if not voice_path:
+            raise ValueError("StyleTTS2 requires a voice sample for cloning")
+        
+        # StyleTTS2 supported emotions
+        styletts2_emotions = ["neutral", "happy", "sad", "angry", "fear", "excited"]
+        
+        # Map standard/app emotions to StyleTTS2 emotions
+        # App sentiment labels: joy, sadness, anger, fear, surprise, disgust, neutral,
+        # anxious, hopeful, melancholy, fearful, surprised, disgusted
+        emotion_map = {
+            # Standard emotions
+            "neutral": "neutral",
+            "happy": "happy",
+            "sad": "sad",
+            "angry": "angry",
+            "fear": "fear",
+            "surprise": "excited",
+            "disgust": "angry",
+            "excited": "excited",
+            "calm": "neutral",
+            "confused": "neutral",
+            # App-specific sentiment labels
+            "joy": "happy",
+            "sadness": "sad",
+            "anger": "angry",
+            "fearful": "fear",
+            "surprised": "excited",
+            "disgusted": "angry",
+            "anxious": "fear",
+            "hopeful": "happy",
+            "melancholy": "sad",
+        }
+        
+        mapped_emotion = emotion_map.get(emotion.lower() if emotion else "neutral", "neutral")
+        
+        # Try to load voice transcript
+        voice_text = ""
+        if voice_path:
+            txt_path = voice_path.rsplit(".", 1)[0] + ".txt"
+            if os.path.exists(txt_path):
+                try:
+                    with open(txt_path, "r") as f:
+                        voice_text = f.read().strip()
+                    logger.info(f"Loaded voice transcript for StyleTTS2: {voice_text[:50]}...")
+                except Exception as e:
+                    logger.warning(f"Failed to load transcript: {e}")
+        
+        space_url = "CherithCutestory/styletts2"
+        timeout_secs = 300
+        
+        logger.info(f"StyleTTS2 generating with emotion: {mapped_emotion}, speed: {speed}, pitch: {pitch}")
+        
+        loop = asyncio.get_running_loop()
+        
+        def call_gradio():
+            httpx_kwargs = {
+                "timeout": httpx.Timeout(timeout_secs, connect=60.0)
+            }
+            
+            client = Client(space_url, httpx_kwargs=httpx_kwargs)
+            
+            result = client.predict(
+                text=text,
+                voice_wav=handle_file(voice_path),
+                voice_text=voice_text,
+                emotion=mapped_emotion,
+                speed=speed,
+                pitch=pitch,
+                seed=42,
+                api_name="/tts"
+            )
+            return result
+        
+        result = await loop.run_in_executor(None, call_gradio)
+        
+        # Result is audio file path
+        audio_path = result
+        audio, sr = sf.read(audio_path)
+        
+        if sr != self.sample_rate:
+            from scipy import signal
+            samples = int(len(audio) * self.sample_rate / sr)
+            audio = signal.resample(audio, samples)
+        
+        # StyleTTS2 has native speed/pitch control, no pyrubberband needed
+        return audio.astype(np.float32)
     
     async def _generate_with_soprano(self, text: str) -> np.ndarray:
         """

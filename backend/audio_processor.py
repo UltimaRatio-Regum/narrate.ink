@@ -201,6 +201,48 @@ class AudioProcessor:
             base_pitch_offset, base_speed_factor, base_volume_factor
         )
     
+    def get_sentiment_prosody_adjustments(
+        self,
+        sentiment_label: str,
+        sentiment_score: float = 1.0,
+        base_pitch_offset: float = 0,
+        base_speed_factor: float = 1.0,
+        base_volume_factor: float = 1.0,
+    ) -> dict:
+        """
+        Calculate sentiment-based prosody adjustments without applying them.
+        
+        Used by TTS engines with native speed/pitch support (like StyleTTS2).
+        
+        Args:
+            sentiment_label: Detected sentiment (happy, sad, angry, etc.)
+            sentiment_score: Confidence of sentiment (0-1), used to scale the effect
+            base_pitch_offset: Additional pitch offset in semitones
+            base_speed_factor: Additional speed multiplier
+            base_volume_factor: Additional volume multiplier
+            
+        Returns:
+            Dict with 'speed', 'pitch', 'volume' adjustments
+        """
+        emotion_label = sentiment_label.lower() if sentiment_label else "neutral"
+        
+        pitch_offset = self.EMOTION_PITCH_MAP.get(emotion_label, 0) * sentiment_score
+        pitch_offset += base_pitch_offset
+        
+        speed_factor = self.EMOTION_SPEED_MAP.get(emotion_label, 1.0)
+        speed_factor = 1.0 + (speed_factor - 1.0) * sentiment_score
+        speed_factor *= base_speed_factor
+        
+        volume_factor = self.EMOTION_VOLUME_MAP.get(emotion_label, 1.0)
+        volume_factor = 1.0 + (volume_factor - 1.0) * sentiment_score
+        volume_factor *= base_volume_factor
+        
+        return {
+            "speed": speed_factor,
+            "pitch": pitch_offset,
+            "volume": volume_factor,
+        }
+    
     def apply_pitch_shift(
         self,
         audio_data: np.ndarray,
