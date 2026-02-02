@@ -68,7 +68,7 @@ export function VoiceLibrary({
     return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
 
-  const showClonableVoices = ttsEngine === "chatterbox-free" || ttsEngine === "chatterbox-paid";
+  const showClonableVoices = ttsEngine === "chatterbox-free" || ttsEngine === "hf-tts-paid" || ttsEngine === "styletts2";
   const showEdgeVoices = ttsEngine === "edge-tts";
   const showOpenaiVoices = ttsEngine === "openai";
 
@@ -129,12 +129,16 @@ export function VoiceLibrary({
         return "Microsoft Azure neural voices";
       case "chatterbox-free":
         return "Voice cloning (HuggingFace free tier)";
-      case "chatterbox-paid":
-        return "Voice cloning (paid API)";
+      case "hf-tts-paid":
+        return "Voice cloning (HuggingFace TTS Paid)";
+      case "styletts2":
+        return "Voice cloning (StyleTTS2 Expressive)";
       case "openai":
         return "OpenAI TTS voices";
       case "piper":
         return "Piper TTS voices";
+      case "soprano":
+        return "Soprano TTS voices";
       default:
         return "Available voices";
     }

@@ -69,7 +69,7 @@ export function BeginnerTab() {
 
   const { data: libraryVoices = [] } = useQuery<LibraryVoice[]>({
     queryKey: ["/api/voice-library"],
-    enabled: ttsEngine === "chatterbox-free" || ttsEngine === "chatterbox-paid",
+    enabled: ttsEngine === "chatterbox-free" || ttsEngine === "hf-tts-paid" || ttsEngine === "styletts2",
   });
 
   useEffect(() => {
@@ -170,7 +170,7 @@ export function BeginnerTab() {
         label: `${v.name} - ${v.description}`,
       }));
     }
-    if ((ttsEngine === "chatterbox-free" || ttsEngine === "chatterbox-paid") && libraryVoices) {
+    if ((ttsEngine === "chatterbox-free" || ttsEngine === "hf-tts-paid" || ttsEngine === "styletts2") && libraryVoices) {
       return libraryVoices.map(v => ({
         value: `library:${v.id}`,
         label: v.name,
@@ -227,14 +227,15 @@ export function BeginnerTab() {
             <div className="space-y-2">
               <label className="text-sm font-medium">TTS Engine</label>
               <Select value={ttsEngine} onValueChange={(v) => setTTSEngine(v as TTSEngine)}>
-                <SelectTrigger data-testid="select-tts-engine">
+                <SelectTrigger data-testid="select-tts-engine-beginner">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="edge-tts">Edge TTS (Recommended)</SelectItem>
                   <SelectItem value="openai">OpenAI TTS</SelectItem>
                   <SelectItem value="chatterbox-free">Chatterbox Free</SelectItem>
-                  <SelectItem value="chatterbox-paid">Chatterbox Paid</SelectItem>
+                  <SelectItem value="hf-tts-paid">HuggingFace TTS Paid</SelectItem>
+                  <SelectItem value="styletts2">StyleTTS2 (Expressive)</SelectItem>
                   <SelectItem value="piper">Piper TTS</SelectItem>
                   <SelectItem value="soprano">Soprano TTS</SelectItem>
                 </SelectContent>

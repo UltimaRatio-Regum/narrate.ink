@@ -45,11 +45,18 @@ const TTS_ENGINES: TTSEngineOption[] = [
     badgeVariant: "outline",
   },
   {
-    id: "chatterbox-paid",
-    name: "Chatterbox Paid (Custom API)",
-    description: "Voice cloning via custom endpoint, no char limit",
+    id: "hf-tts-paid",
+    name: "HuggingFace TTS Paid",
+    description: "Multi-model voice cloning (Qwen3, Chatterbox, XTTS, StyleTTS2)",
     badge: "API Key",
     badgeVariant: "secondary",
+  },
+  {
+    id: "styletts2",
+    name: "StyleTTS2 (Expressive)",
+    description: "Expressive TTS with emotion control via HuggingFace Space",
+    badge: "Free",
+    badgeVariant: "outline",
   },
   {
     id: "piper",
@@ -91,10 +98,10 @@ export function SettingsPanel({
     paid: { configured: boolean; api_url_set: boolean; api_key_set: boolean };
   }>({
     queryKey: ["/api/chatterbox-status"],
-    enabled: ttsEngine === "chatterbox-paid",
+    enabled: ttsEngine === "hf-tts-paid",
   });
 
-  const showPaidWarning = ttsEngine === "chatterbox-paid" && chatterboxStatus && !chatterboxStatus.paid.configured;
+  const showPaidWarning = ttsEngine === "hf-tts-paid" && chatterboxStatus && !chatterboxStatus.paid.configured;
 
   return (
     <Card>
