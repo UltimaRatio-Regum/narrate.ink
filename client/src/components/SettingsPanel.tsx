@@ -12,67 +12,8 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useQuery } from "@tanstack/react-query";
+import { TTS_ENGINES, getTTSEngine } from "@/lib/tts-engines";
 import type { TTSEngine } from "@shared/schema";
-
-interface TTSEngineOption {
-  id: TTSEngine;
-  name: string;
-  description: string;
-  badge?: string;
-  badgeVariant?: "default" | "secondary" | "destructive" | "outline";
-}
-
-const TTS_ENGINES: TTSEngineOption[] = [
-  {
-    id: "edge-tts",
-    name: "Edge TTS (Azure Neural)",
-    description: "47 English neural voices, free, high quality",
-    badge: "Recommended",
-    badgeVariant: "default",
-  },
-  {
-    id: "openai",
-    name: "OpenAI TTS",
-    description: "6 premium voices, requires API key",
-    badge: "API Key",
-    badgeVariant: "secondary",
-  },
-  {
-    id: "chatterbox-free",
-    name: "Chatterbox Free (HuggingFace)",
-    description: "Voice cloning via free HuggingFace Spaces, 300 char limit",
-    badge: "Free",
-    badgeVariant: "outline",
-  },
-  {
-    id: "hf-tts-paid",
-    name: "HuggingFace TTS Paid",
-    description: "Multi-model voice cloning (Qwen3, Chatterbox, XTTS, StyleTTS2)",
-    badge: "API Key",
-    badgeVariant: "secondary",
-  },
-  {
-    id: "styletts2",
-    name: "StyleTTS2 (Expressive)",
-    description: "Expressive TTS with emotion control via HuggingFace Space",
-    badge: "Free",
-    badgeVariant: "outline",
-  },
-  {
-    id: "piper",
-    name: "Piper TTS",
-    description: "Fast open source TTS, many voices",
-    badge: "Local",
-    badgeVariant: "outline",
-  },
-  {
-    id: "soprano",
-    name: "Soprano TTS (80M)",
-    description: "Ultra-fast local TTS, 2000x real-time on GPU",
-    badge: "Local",
-    badgeVariant: "default",
-  },
-];
 
 interface SettingsPanelProps {
   exaggeration: number;

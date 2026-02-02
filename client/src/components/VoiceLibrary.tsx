@@ -17,6 +17,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import { isVoiceCloningEngine } from "@/lib/tts-engines";
 import type { LibraryVoice, EdgeVoice, OpenAIVoice, TTSEngine } from "@shared/schema";
 
 interface VoiceLibraryProps {
@@ -68,7 +69,7 @@ export function VoiceLibrary({
     return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
 
-  const showClonableVoices = ttsEngine === "chatterbox-free" || ttsEngine === "hf-tts-paid" || ttsEngine === "styletts2";
+  const showClonableVoices = isVoiceCloningEngine(ttsEngine);
   const showEdgeVoices = ttsEngine === "edge-tts";
   const showOpenaiVoices = ttsEngine === "openai";
 

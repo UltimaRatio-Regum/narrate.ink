@@ -18,6 +18,7 @@ VoxLibris is a web application designed to transform plain text into expressive 
 - **UI Components**: Shadcn/ui
 - **UI/UX Decisions**: Four-tab layout (Beginner, Advanced, Jobs, Settings), file upload workflow, wizard-style generation flow (Upload → Analyzing → Voice Selection → Generate), real-time progress updates, dark mode support.
 - **Settings Tab**: Default TTS engine/voice selection (persisted to localStorage), emotion prosody configuration table with pitch/speed/volume weights (persisted to prosody_settings.json).
+- **TTS Engine Configuration**: Centralized in `client/src/lib/tts-engines.ts` with `TTS_ENGINES` array defining all engines with properties (id, label, name, description, badge, supportsVoiceCloning, requiresApiKey, isLocal). Helper functions: `isVoiceCloningEngine()`, `getTTSEngine()`, `getVoiceCloningEngines()`, `getLocalEngines()`.
 
 ### Backend (Python + FastAPI)
 - **Framework**: FastAPI with uvicorn

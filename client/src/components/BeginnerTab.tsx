@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { TTS_ENGINES, isVoiceCloningEngine } from "@/lib/tts-engines";
 import type { TTSEngine, EdgeVoice, LibraryVoice, OpenAIVoice } from "@shared/schema";
 
 interface Upload {
@@ -69,7 +70,7 @@ export function BeginnerTab() {
 
   const { data: libraryVoices = [] } = useQuery<LibraryVoice[]>({
     queryKey: ["/api/voice-library"],
-    enabled: ttsEngine === "chatterbox-free" || ttsEngine === "hf-tts-paid" || ttsEngine === "styletts2",
+    enabled: isVoiceCloningEngine(ttsEngine),
   });
 
   useEffect(() => {
@@ -170,7 +171,7 @@ export function BeginnerTab() {
         label: `${v.name} - ${v.description}`,
       }));
     }
-    if ((ttsEngine === "chatterbox-free" || ttsEngine === "hf-tts-paid" || ttsEngine === "styletts2") && libraryVoices) {
+    if (isVoiceCloningEngine(ttsEngine) && libraryVoices) {
       return libraryVoices.map(v => ({
         value: `library:${v.id}`,
         label: v.name,
@@ -231,13 +232,11 @@ export function BeginnerTab() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="edge-tts">Edge TTS (Recommended)</SelectItem>
-                  <SelectItem value="openai">OpenAI TTS</SelectItem>
-                  <SelectItem value="chatterbox-free">Chatterbox Free</SelectItem>
-                  <SelectItem value="hf-tts-paid">HuggingFace TTS Paid</SelectItem>
-                  <SelectItem value="styletts2">StyleTTS2 (Expressive)</SelectItem>
-                  <SelectItem value="piper">Piper TTS</SelectItem>
-                  <SelectItem value="soprano">Soprano TTS</SelectItem>
+                  {TTS_ENGINES.map((engine) => (
+                    <SelectItem key={engine.id} value={engine.id}>
+                      {engine.label}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>

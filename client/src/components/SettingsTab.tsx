@@ -22,6 +22,8 @@ import {
 } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { TTS_ENGINES, isVoiceCloningEngine } from "@/lib/tts-engines";
+import type { TTSEngine, LibraryVoice, EdgeVoice, OpenAIVoice } from "@shared/schema";
 
 interface ProsodySettings {
   pitch: Record<string, number>;
@@ -30,35 +32,6 @@ interface ProsodySettings {
   intensity: Record<string, number>;
   emotions: string[];
 }
-
-interface EdgeVoice {
-  id: string;
-  name: string;
-  gender: string;
-  locale: string;
-}
-
-interface OpenAIVoice {
-  id: string;
-  name: string;
-  description: string;
-}
-
-interface LibraryVoice {
-  id: string;
-  name: string;
-  gender: string;
-}
-
-const TTS_ENGINES = [
-  { value: "edge-tts", label: "Edge TTS (Recommended)" },
-  { value: "openai", label: "OpenAI TTS" },
-  { value: "chatterbox-free", label: "Chatterbox Free" },
-  { value: "hf-tts-paid", label: "HuggingFace TTS Paid" },
-  { value: "styletts2", label: "StyleTTS2 (Expressive)" },
-  { value: "piper", label: "Piper TTS" },
-  { value: "soprano", label: "Soprano TTS" },
-];
 
 const CHATTERBOX_MODELS = [
   { value: "qwen3", label: "Qwen3 TTS (Best quality)" },
@@ -173,11 +146,11 @@ export function SettingsTab() {
     enabled: defaultEngine === "openai",
   });
 
-  const isVoiceCloningEngine = ["chatterbox-free", "hf-tts-paid", "styletts2"].includes(defaultEngine);
+  const showVoiceCloningOptions = isVoiceCloningEngine(defaultEngine as TTSEngine);
   
   const { data: libraryVoicesData } = useQuery<LibraryVoice[]>({
     queryKey: ["/api/voice-library"],
-    enabled: isVoiceCloningEngine,
+    enabled: showVoiceCloningOptions,
   });
 
   useEffect(() => {
@@ -324,7 +297,7 @@ export function SettingsTab() {
         label: `${v.name} - ${v.description}`,
       }));
     }
-    if (isVoiceCloningEngine && libraryVoicesData) {
+    if (showVoiceCloningOptions && libraryVoicesData) {
       return libraryVoicesData.map((v) => ({
         value: `library:${v.id}`,
         label: v.name,
@@ -355,7 +328,7 @@ export function SettingsTab() {
                 </SelectTrigger>
                 <SelectContent>
                   {TTS_ENGINES.map((engine) => (
-                    <SelectItem key={engine.value} value={engine.value}>
+                    <SelectItem key={engine.id} value={engine.id}>
                       {engine.label}
                     </SelectItem>
                   ))}
