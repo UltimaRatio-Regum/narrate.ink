@@ -351,7 +351,17 @@ export function SettingsTab() {
         label: v.name,
       }));
     }
-    return [];
+    const remoteEngine = registeredEngines?.find(e => e.engine_id === defaultEngine);
+    if (remoteEngine) {
+      if (remoteEngine.builtin_voices.length > 0) {
+        return remoteEngine.builtin_voices.map((v: any) => ({
+          value: v.id || v.name,
+          label: v.name || v.id,
+        }));
+      }
+      return [{ value: "default", label: "Default" }];
+    }
+    return [{ value: "default", label: "Default" }];
   };
 
   const voiceOptions = getVoiceOptions();
@@ -398,7 +408,7 @@ export function SettingsTab() {
                 disabled={voiceOptions.length === 0}
               >
                 <SelectTrigger id="default-voice" data-testid="select-default-voice">
-                  <SelectValue placeholder={voiceOptions.length === 0 ? "Loading voices..." : "Select voice"} />
+                  <SelectValue placeholder="Select voice" />
                 </SelectTrigger>
                 <SelectContent>
                   {voiceOptions.map((opt) => (
