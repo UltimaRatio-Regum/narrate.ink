@@ -43,6 +43,29 @@ VoxLibris is a web application designed to transform plain text into expressive 
 - **engines/qwen25-tts/**: HuggingFace Space (Docker SDK) serving Qwen2.5-Omni-7B as a REST API implementing the VoxLibris TTS API Contract. Files: `app.py` (FastAPI), `Dockerfile`, `requirements.txt`, `README.md`. Built-in voices (Chelsie, Ethan), voice cloning via audio conditioning, emotion prompting, pyrubberband speed/pitch adjustment, 16 languages. Requires GPU (A10G+). Deploy to HF Spaces, then register the URL in VoxLibris Settings.
 - **engines/qwen3-tts/**: HuggingFace Space (Docker SDK) serving Qwen3-TTS-12Hz-1.7B as a REST API implementing the VoxLibris TTS API Contract. Uses `qwen_tts` package with `Qwen3TTSModel`. Two models loaded: CustomVoice (9 built-in speakers with instruct-based emotion) and Base (voice cloning via x-vector). Files: `app.py` (FastAPI), `Dockerfile`, `requirements.txt`, `index.html`, `README.md`. 9 voices (Ryan, Aiden, Vivian, Serena, Uncle Fu, Dylan, Eric, Ono Anna, Sohee), pyrubberband speed/pitch. Requires GPU (L4+). Deploy to HF Spaces, then register the URL in VoxLibris Settings.
 
+## Docker Deployment
+
+The app can be run with Docker and Docker Compose. The setup includes:
+- **Dockerfile**: Multi-stage build (Node.js frontend build → Python deps → combined runtime). Produces a single image that runs both the Express server and the Python FastAPI backend.
+- **docker-compose.yml**: Orchestrates the app container and a PostgreSQL 16 database with a persistent volume.
+- **docker-entrypoint.sh**: Startup script that launches the Python backend, waits for it to be healthy, then starts the Node.js server.
+- **.env.example**: Template for environment variables (copy to `.env` and fill in).
+
+### Quick Start
+```bash
+cp .env.example .env        # Edit .env with your secrets
+docker compose up --build    # Build and start all services
+```
+
+The app will be available at `http://localhost:5000`. PostgreSQL runs internally on port 5432 (mapped to host via `DB_PORT`).
+
+### Environment Variables
+- `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`: Database credentials (defaults: `voxlibris`)
+- `SESSION_SECRET`: Express session secret (required for production)
+- `AI_INTEGRATIONS_OPENROUTER_BASE_URL`, `AI_INTEGRATIONS_OPENROUTER_API_KEY`: Optional, for LLM-powered speaker detection
+- `APP_PORT`: Host port for the app (default: 5000)
+- `DB_PORT`: Host port for PostgreSQL (default: 5432)
+
 ## External Dependencies
 - **Microsoft Azure Neural TTS**: (via `edge-tts`)
 - **Soprano TTS**: (ekwek/Soprano-1.1-80M)

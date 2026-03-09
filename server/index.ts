@@ -51,13 +51,16 @@ app.use((req, res, next) => {
 });
 
 (async () => {
-  // Start Python backend first
-  try {
-    await startPythonBackend();
-    log("Python backend started successfully");
-  } catch (err) {
-    log(`Warning: Python backend failed to start: ${err}`, "python-err");
-    log("Continuing without Python backend...", "express");
+  if (process.env.SKIP_PYTHON_SPAWN === "1") {
+    log("SKIP_PYTHON_SPAWN is set, assuming Python backend is managed externally", "python");
+  } else {
+    try {
+      await startPythonBackend();
+      log("Python backend started successfully");
+    } catch (err) {
+      log(`Warning: Python backend failed to start: ${err}`, "python-err");
+      log("Continuing without Python backend...", "express");
+    }
   }
 
   // Register proxy routes BEFORE body parsers
