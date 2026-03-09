@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>StyleTTS2 - Test Console</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0a0d14;
+      color: #e2e0eb;
+      min-height: 100vh;
+      padding: 2rem;
+    }
+    .container { max-width: 720px; margin: 0 auto; }
+    h1 {
+      font-size: 1.75rem;
+      font-weight: 700;
+      background: linear-gradient(135deg, #ec4899, #8b5cf6);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 0.25rem;
+    }
+    .subtitle { color: #9490a8; font-size: 0.875rem; margin-bottom: 2rem; }
+    .card {
+      background: #111827;
+      border: 1px solid #1f2937;
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin-bottom: 1.25rem;
+    }
+    .card-title {
+      font-size: 0.8rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #a78bfa;
+      margin-bottom: 1rem;
+    }
+    label {
+      display: block;
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: #b0adc0;
+      margin-bottom: 0.35rem;
+    }
+    textarea, input[type="text"], input[type="number"], select {
+      width: 100%;
+      background: #0d1117;
+      border: 1px solid #1f2937;
+      border-radius: 8px;
+      padding: 0.65rem 0.85rem;
+      color: #e2e0eb;
+      font-size: 0.9rem;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    textarea:focus, input:focus, select:focus { border-color: #8b5cf6; }
+    textarea { resize: vertical; min-height: 100px; }
+    .field { margin-bottom: 1rem; }
+    .row { display: flex; gap: 1rem; }
+    .row > .field { flex: 1; }
+    .emotion-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.5rem;
+    }
+    .emotion-btn {
+      padding: 0.55rem 0.5rem;
+      background: #0d1117;
+      border: 1px solid #1f2937;
+      border-radius: 8px;
+      color: #9490a8;
+      font-size: 0.8rem;
+      font-weight: 500;
+      cursor: pointer;
+      text-align: center;
+      transition: all 0.2s;
+    }
+    .emotion-btn:hover { border-color: #8b5cf6; color: #e2e0eb; }
+    .emotion-btn.selected { border-color: #8b5cf6; background: rgba(139,92,246,0.15); color: #c4b5fd; }
+    .file-upload {
+      border: 2px dashed #1f2937;
+      border-radius: 8px;
+      padding: 1.25rem;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    .file-upload:hover { border-color: #8b5cf6; background: rgba(139,92,246,0.05); }
+    .file-upload.has-file { border-color: #22c55e; background: rgba(34,197,94,0.05); }
+    .file-upload input { display: none; }
+    .file-upload-text { font-size: 0.85rem; color: #9490a8; }
+    .file-upload-text strong { color: #a78bfa; }
+    .file-name { font-size: 0.8rem; color: #22c55e; margin-top: 0.5rem; }
+    .clone-note {
+      font-size: 0.75rem;
+      color: #9490a8;
+      margin-top: 0.5rem;
+      padding: 0.5rem 0.75rem;
+      background: rgba(139,92,246,0.05);
+      border-radius: 6px;
+      border: 1px solid rgba(139,92,246,0.1);
+    }
+    button.generate {
+      width: 100%;
+      padding: 0.85rem;
+      background: linear-gradient(135deg, #8b5cf6, #6d28d9);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+    button.generate:hover { opacity: 0.9; }
+    button.generate:disabled { opacity: 0.5; cursor: not-allowed; }
+    .result-area { margin-top: 1.25rem; }
+    .result-area.hidden { display: none; }
+    audio { width: 100%; margin: 0.75rem 0; }
+    .download-link {
+      display: inline-block;
+      padding: 0.5rem 1rem;
+      background: #22c55e;
+      color: #0a0d14;
+      border-radius: 6px;
+      text-decoration: none;
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+    .download-link:hover { opacity: 0.9; }
+    .error-box {
+      background: rgba(239,68,68,0.1);
+      border: 1px solid rgba(239,68,68,0.3);
+      border-radius: 8px;
+      padding: 0.85rem;
+      color: #fca5a5;
+      font-size: 0.85rem;
+    }
+    .status {
+      text-align: center;
+      padding: 1rem;
+      color: #9490a8;
+      font-size: 0.9rem;
+    }
+    .spinner {
+      display: inline-block;
+      width: 18px; height: 18px;
+      border: 2px solid #1f2937;
+      border-top-color: #8b5cf6;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+      vertical-align: middle;
+      margin-right: 0.5rem;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .health-badge {
+      display: inline-block;
+      padding: 0.2rem 0.6rem;
+      border-radius: 99px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    .health-badge.ok { background: rgba(34,197,94,0.15); color: #22c55e; }
+    .health-badge.error { background: rgba(239,68,68,0.15); color: #ef4444; }
+    .health-badge.loading { background: rgba(139,92,246,0.15); color: #a78bfa; }
+    .header-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.25rem; }
+    .param-info {
+      font-size: 0.7rem;
+      color: #6b7280;
+      margin-top: 0.25rem;
+    }
+    input[type="range"] {
+      width: 100%;
+      accent-color: #8b5cf6;
+    }
+    .range-row {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .range-val {
+      font-size: 0.8rem;
+      color: #a78bfa;
+      min-width: 2.5rem;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header-row">
+      <h1>StyleTTS2 Test Console</h1>
+      <span id="healthBadge" class="health-badge loading">checking...</span>
+    </div>
+    <p class="subtitle">Style diffusion TTS &mdash; human-level speech with emotion control &amp; voice cloning</p>
+
+    <div class="card">
+      <div class="card-title">Text Input</div>
+      <div class="field">
+        <label for="inputText">Text to speak</label>
+        <textarea id="inputText" placeholder="Enter text to convert to speech...">The art of storytelling has been a fundamental part of human culture for thousands of years, bringing people together and preserving our shared history.</textarea>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Emotion &amp; Style</div>
+      <div class="field">
+        <label>Select emotion</label>
+        <div class="emotion-grid" id="emotionGrid"></div>
+      </div>
+      <div class="field">
+        <label>Intensity</label>
+        <div class="range-row">
+          <span class="range-val">Subtle</span>
+          <input type="range" id="intensity" min="10" max="100" value="50">
+          <span class="range-val">Strong</span>
+        </div>
+        <div class="param-info">Controls how strongly the emotion affects the output (scales embedding_scale)</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Voice Cloning (Optional)</div>
+      <div class="field">
+        <label>Upload reference audio to clone voice style</label>
+        <div class="file-upload" id="dropZone">
+          <input type="file" id="voiceFile" accept=".wav,.mp3,audio/wav,audio/mpeg">
+          <div class="file-upload-text">
+            <strong>Click to upload</strong> or drag &amp; drop a WAV/MP3 file
+          </div>
+          <div class="file-name" id="fileName"></div>
+        </div>
+        <div class="clone-note">
+          StyleTTS2 uses reference audio to extract voice style (timbre and prosody). Without reference audio, it generates a style from the text using diffusion. A 3-10 second clip of clear speech works best.
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Audio Parameters</div>
+      <div class="row">
+        <div class="field">
+          <label for="volume">Volume (1-100)</label>
+          <input type="number" id="volume" value="75" min="1" max="100">
+        </div>
+        <div class="field">
+          <label for="speed">Speed (-5 to 5)</label>
+          <input type="number" id="speed" value="0" min="-5" max="5" step="0.5">
+        </div>
+        <div class="field">
+          <label for="pitch">Pitch (-5 to 5)</label>
+          <input type="number" id="pitch" value="0" min="-5" max="5" step="0.5">
+        </div>
+      </div>
+    </div>
+
+    <button class="generate" id="generateBtn" onclick="generate()">Generate Speech</button>
+
+    <div class="result-area hidden" id="resultArea">
+      <div class="card">
+        <div class="card-title">Result</div>
+        <div id="resultContent"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const emotions = ["neutral", "happy", "sad", "angry", "fear", "excited", "calm", "surprise", "whisper"];
+    let selectedEmotion = "neutral";
+    let voiceBase64 = null;
+
+    const emotionGrid = document.getElementById('emotionGrid');
+    emotions.forEach(e => {
+      const btn = document.createElement('div');
+      btn.className = 'emotion-btn' + (e === selectedEmotion ? ' selected' : '');
+      btn.textContent = e.charAt(0).toUpperCase() + e.slice(1);
+      btn.onclick = () => {
+        document.querySelectorAll('.emotion-btn').forEach(b => b.classList.remove('selected'));
+        btn.classList.add('selected');
+        selectedEmotion = e;
+      };
+      emotionGrid.appendChild(btn);
+    });
+
+    const dropZone = document.getElementById('dropZone');
+    const voiceFile = document.getElementById('voiceFile');
+    const fileNameEl = document.getElementById('fileName');
+
+    dropZone.addEventListener('click', () => voiceFile.click());
+    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.style.borderColor = '#8b5cf6'; });
+    dropZone.addEventListener('dragleave', () => { dropZone.style.borderColor = ''; });
+    dropZone.addEventListener('drop', e => {
+      e.preventDefault();
+      dropZone.style.borderColor = '';
+      if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+    });
+    voiceFile.addEventListener('change', () => { if (voiceFile.files.length) handleFile(voiceFile.files[0]); });
+
+    function handleFile(file) {
+      fileNameEl.textContent = file.name + ' (' + (file.size / 1024).toFixed(1) + ' KB)';
+      dropZone.classList.add('has-file');
+      const reader = new FileReader();
+      reader.onload = () => {
+        const bytes = new Uint8Array(reader.result);
+        let binary = '';
+        for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+        voiceBase64 = btoa(binary);
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    async function generate() {
+      const btn = document.getElementById('generateBtn');
+      const resultArea = document.getElementById('resultArea');
+      const resultContent = document.getElementById('resultContent');
+      const text = document.getElementById('inputText').value.trim();
+
+      if (!text) { alert('Please enter some text.'); return; }
+
+      btn.disabled = true;
+      btn.textContent = 'Generating...';
+      resultArea.classList.remove('hidden');
+      resultContent.innerHTML = '<div class="status"><span class="spinner"></span> Generating audio with StyleTTS2... this may take a moment.</div>';
+
+      const payload = {
+        input_text: text,
+        emotion_set: [selectedEmotion],
+        intensity: parseInt(document.getElementById('intensity').value) || 50,
+        volume: parseInt(document.getElementById('volume').value) || 75,
+        speed_adjust: parseFloat(document.getElementById('speed').value) || 0,
+        pitch_adjust: parseFloat(document.getElementById('pitch').value) || 0,
+      };
+
+      if (voiceBase64) {
+        payload.voice_to_clone_sample = voiceBase64;
+      }
+
+      try {
+        const resp = await fetch('/ConvertTextToSpeech', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+
+        if (!resp.ok) {
+          const err = await resp.json();
+          resultContent.innerHTML = '<div class="error-box"><strong>' + (err.error_code || 'Error') + ':</strong> ' + err.error + '</div>';
+          return;
+        }
+
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        resultContent.innerHTML =
+          '<audio controls autoplay src="' + url + '"></audio>' +
+          '<a class="download-link" href="' + url + '" download="styletts2_output.wav">Download WAV</a>';
+      } catch (e) {
+        resultContent.innerHTML = '<div class="error-box">Request failed: ' + e.message + '</div>';
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Generate Speech';
+      }
+    }
+
+    async function checkHealth() {
+      const badge = document.getElementById('healthBadge');
+      try {
+        const resp = await fetch('/health');
+        const data = await resp.json();
+        if (data.model_loaded) {
+          badge.textContent = 'Model Ready';
+          badge.className = 'health-badge ok';
+        } else {
+          badge.textContent = 'Loading...';
+          badge.className = 'health-badge loading';
+          setTimeout(checkHealth, 5000);
+        }
+      } catch {
+        badge.textContent = 'Offline';
+        badge.className = 'health-badge error';
+        setTimeout(checkHealth, 10000);
+      }
+    }
+    checkHealth();
+  </script>
+</body>
+</html>
