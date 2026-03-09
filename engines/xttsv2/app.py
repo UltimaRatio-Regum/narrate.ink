@@ -1,4 +1,7 @@
 import os
+os.environ.setdefault("OMP_NUM_THREADS", "4")
+os.environ.setdefault("COQUI_TOS_AGREED", "1")
+
 import io
 import base64
 import tempfile
