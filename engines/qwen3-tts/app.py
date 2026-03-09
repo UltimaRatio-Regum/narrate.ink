@@ -38,20 +38,72 @@ BUILTIN_SPEAKERS = [
 ]
 
 EMOTION_TO_INSTRUCT = {
-    "neutral": "",
-    "happy": "Speak with a happy, cheerful tone.",
-    "sad": "Speak with a sad, melancholy tone.",
-    "angry": "Speak with an angry, forceful tone.",
-    "fear": "Speak with a fearful, trembling tone.",
-    "surprise": "Speak with a surprised, astonished tone.",
-    "excited": "Speak with an excited, energetic tone.",
-    "calm": "Speak with a calm, soothing tone.",
-    "disgust": "Speak with a disgusted tone.",
-    "confused": "Speak with a confused, uncertain tone.",
-    "anxious": "Speak with an anxious, worried tone.",
-    "hopeful": "Speak with a hopeful, optimistic tone.",
-    "melancholy": "Speak with a deeply melancholic tone.",
-    "fearful": "Speak with a fearful, trembling tone.",
+    "neutral": {"base": "", "slight": "", "strong": ""},
+    "happy": {
+        "base": "Speak with a happy, cheerful tone.",
+        "slight": "Speak with a slightly happy, cheerful tone.",
+        "strong": "Speak with a very happy, enthusiastically cheerful tone.",
+    },
+    "sad": {
+        "base": "Speak with a sad, melancholy tone.",
+        "slight": "Speak with a slightly sad, subdued tone.",
+        "strong": "Speak with a deeply sad, grief-stricken tone.",
+    },
+    "angry": {
+        "base": "Speak with an angry, forceful tone.",
+        "slight": "Speak with a slightly irritated, firm tone.",
+        "strong": "Speak with a furiously angry, intense tone.",
+    },
+    "fear": {
+        "base": "Speak with a fearful, trembling tone.",
+        "slight": "Speak with a slightly nervous, uneasy tone.",
+        "strong": "Speak with a terrified, panic-stricken tone.",
+    },
+    "surprise": {
+        "base": "Speak with a surprised, astonished tone.",
+        "slight": "Speak with a mildly surprised tone.",
+        "strong": "Speak with a shocked, completely astonished tone.",
+    },
+    "excited": {
+        "base": "Speak with an excited, energetic tone.",
+        "slight": "Speak with a mildly excited, upbeat tone.",
+        "strong": "Speak with an extremely excited, exhilarated tone.",
+    },
+    "calm": {
+        "base": "Speak with a calm, soothing tone.",
+        "slight": "Speak with a relaxed, even tone.",
+        "strong": "Speak with a very calm, deeply serene tone.",
+    },
+    "disgust": {
+        "base": "Speak with a disgusted tone.",
+        "slight": "Speak with a mildly disapproving tone.",
+        "strong": "Speak with a deeply disgusted, revolted tone.",
+    },
+    "confused": {
+        "base": "Speak with a confused, uncertain tone.",
+        "slight": "Speak with a slightly puzzled tone.",
+        "strong": "Speak with a very confused, bewildered tone.",
+    },
+    "anxious": {
+        "base": "Speak with an anxious, worried tone.",
+        "slight": "Speak with a slightly worried, tense tone.",
+        "strong": "Speak with a very anxious, distressed tone.",
+    },
+    "hopeful": {
+        "base": "Speak with a hopeful, optimistic tone.",
+        "slight": "Speak with a mildly hopeful tone.",
+        "strong": "Speak with a very hopeful, passionately optimistic tone.",
+    },
+    "melancholy": {
+        "base": "Speak with a melancholic tone.",
+        "slight": "Speak with a slightly wistful tone.",
+        "strong": "Speak with a deeply melancholic, sorrowful tone.",
+    },
+    "fearful": {
+        "base": "Speak with a fearful, trembling tone.",
+        "slight": "Speak with a slightly nervous, uneasy tone.",
+        "strong": "Speak with a terrified, panic-stricken tone.",
+    },
 }
 
 model = None
@@ -202,14 +254,14 @@ async def convert_text_to_speech(request: Request):
         instruct = ""
         if req.emotion_set:
             dominant = req.emotion_set[0]
-            base_instruct = EMOTION_TO_INSTRUCT.get(dominant, "")
-            if base_instruct:
+            emotion_entry = EMOTION_TO_INSTRUCT.get(dominant, None)
+            if emotion_entry:
                 if req.intensity > 66:
-                    instruct = base_instruct.replace("Speak with", "Speak with a very strong,")
+                    instruct = emotion_entry["strong"]
                 elif req.intensity < 33:
-                    instruct = base_instruct.replace("Speak with", "Speak with a slightly")
+                    instruct = emotion_entry["slight"]
                 else:
-                    instruct = base_instruct
+                    instruct = emotion_entry["base"]
 
         if req.voice_to_clone_sample:
             ref_audio_b64 = req.voice_to_clone_sample
