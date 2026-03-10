@@ -1,0 +1,29 @@
+
+--> RUN pip install --no-cache-dir -r requirements.txt
+Collecting openvoice@ git+https://github.com/myshell-ai/OpenVoice.git
+  Cloning https://github.com/myshell-ai/OpenVoice.git to /tmp/pip-install-t21pt0nh/openvoice_9876a5e670ff4b1582dfc52037e52849
+  Running command git clone --filter=blob:none --quiet https://github.com/myshell-ai/OpenVoice.git /tmp/pip-install-t21pt0nh/openvoice_9876a5e670ff4b1582dfc52037e52849
+  Resolved https://github.com/myshell-ai/OpenVoice.git to commit 74a1d147b17a8c3092dd5430504bd83ef6c7eb23
+  Preparing metadata (setup.py): started
+  Preparing metadata (setup.py): finished with status 'done'
+  WARNING: Generating metadata for package openvoice produced metadata for project name myshell-openvoice. Fix your #egg=openvoice fragments.
+Discarding git+https://github.com/myshell-ai/OpenVoice.git: Requested myshell-openvoice from git+https://github.com/myshell-ai/OpenVoice.git (from -r requirements.txt (line 3)) has inconsistent name: expected 'openvoice', but metadata has 'myshell-openvoice'
+Collecting MeloTTS@ git+https://github.com/myshell-ai/MeloTTS.git
+  Cloning https://github.com/myshell-ai/MeloTTS.git to /tmp/pip-install-t21pt0nh/melotts_1253c1ada665427aba314a37e39d99c3
+  Running command git clone --filter=blob:none --quiet https://github.com/myshell-ai/MeloTTS.git /tmp/pip-install-t21pt0nh/melotts_1253c1ada665427aba314a37e39d99c3
+  Resolved https://github.com/myshell-ai/MeloTTS.git to commit 209145371cff8fc3bd60d7be902ea69cbdb7965a
+  Preparing metadata (setup.py): started
+  Preparing metadata (setup.py): finished with status 'done'
+Collecting torch>=2.0.0
+  Downloading torch-2.10.0-cp310-cp310-manylinux_2_28_x86_64.whl (915.6 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 915.6/915.6 MB 193.6 MB/s eta 0:00:00
+Collecting torchaudio>=2.0.0
+  Downloading torchaudio-2.10.0-cp310-cp310-manylinux_2_28_x86_64.whl (1.9 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.9/1.9 MB 417.5 MB/s eta 0:00:00
+ERROR: Could not find a version that satisfies the requirement openvoice (unavailable) (from versions: none)
+ERROR: No matching distribution found for openvoice (unavailable)
+
+[notice] A new release of pip is available: 23.0.1 -> 26.0.1
+[notice] To update, run: pip install --upgrade pip
+
+--> ERROR: process "/bin/sh -c pip install --no-cache-dir -r requirements.txt" did not complete successfully: exit code: 1

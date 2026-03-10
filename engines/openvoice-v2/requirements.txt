@@ -1,6 +1,6 @@
 torch>=2.0.0
 torchaudio>=2.0.0
-openvoice @ git+https://github.com/myshell-ai/OpenVoice.git
+myshell-openvoice @ git+https://github.com/myshell-ai/OpenVoice.git
 MeloTTS @ git+https://github.com/myshell-ai/MeloTTS.git
 fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
