@@ -1,4 +1,4 @@
-import { BookOpen, Quote, User, AlertTriangle, Users } from "lucide-react";
+import { BookOpen, Quote, User, AlertTriangle, Users, Clock, Type } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -54,6 +54,13 @@ export function TextPreview({
   const narrationCount = segments.filter((s) => s.type === "narration").length;
   const reviewCount = segments.filter((s) => s.needsReview).length;
   const speakers = Array.from(new Set(segments.filter((s) => s.speaker).map((s) => s.speaker as string)));
+  const totalWords = segments.reduce((sum, s) => sum + (s.wordCount || 0), 0);
+  const totalDuration = segments.reduce((sum, s) => sum + (s.approxDurationSeconds || 0), 0);
+  const formatDuration = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.round(seconds % 60);
+    return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+  };
 
   return (
     <Card className="h-full flex flex-col">
@@ -82,6 +89,18 @@ export function TextPreview({
                 <Badge variant="outline" className="border-amber-500/50 bg-amber-500/10 text-amber-700 dark:text-amber-400">
                   <AlertTriangle className="h-3 w-3 mr-1" />
                   {reviewCount} need review
+                </Badge>
+              )}
+              {totalWords > 0 && (
+                <Badge variant="secondary" className="border" data-testid="total-words">
+                  <Type className="h-3 w-3 mr-1" />
+                  {totalWords} words
+                </Badge>
+              )}
+              {totalDuration > 0 && (
+                <Badge variant="secondary" className="border" data-testid="total-duration">
+                  <Clock className="h-3 w-3 mr-1" />
+                  ~{formatDuration(totalDuration)}
                 </Badge>
               )}
             </div>
@@ -162,9 +181,16 @@ export function TextPreview({
                         </span>
                       </Badge>
                     )}
-                    {segment.chunkId && (
-                      <span className="text-xs text-muted-foreground">
-                        ~{segment.approxDurationSeconds || 30}s
+                    {segment.wordCount != null && (
+                      <span className="text-xs text-muted-foreground flex items-center gap-0.5" data-testid={`segment-words-${segment.id}`}>
+                        <Type className="h-3 w-3" />
+                        {segment.wordCount}w
+                      </span>
+                    )}
+                    {segment.approxDurationSeconds != null && (
+                      <span className="text-xs text-muted-foreground flex items-center gap-0.5" data-testid={`segment-duration-${segment.id}`}>
+                        <Clock className="h-3 w-3" />
+                        ~{segment.approxDurationSeconds}s
                       </span>
                     )}
                     <span className="text-xs text-muted-foreground ml-auto">

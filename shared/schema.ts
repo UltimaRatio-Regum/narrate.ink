@@ -93,8 +93,9 @@ export const textSegmentSchema = z.object({
   sentiment: sentimentSchema.nullable(),
   startIndex: z.number(),
   endIndex: z.number(),
-  chunkId: z.number().optional(), // For grouping into ~30s chunks
-  approxDurationSeconds: z.number().optional(), // Estimated audio duration
+  wordCount: z.number().optional(),
+  chunkId: z.number().optional(),
+  approxDurationSeconds: z.number().optional(),
 });
 
 export type TextSegment = z.infer<typeof textSegmentSchema>;

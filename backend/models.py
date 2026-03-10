@@ -19,6 +19,8 @@ class TextSegment(BaseModel):
     sentiment: Optional[Sentiment] = None
     startIndex: int
     endIndex: int
+    wordCount: Optional[int] = None
+    approxDurationSeconds: Optional[float] = None
 
 
 class SpeakerConfig(BaseModel):

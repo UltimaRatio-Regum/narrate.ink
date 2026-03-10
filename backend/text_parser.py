@@ -109,8 +109,9 @@ class TextParser:
         end_index: int,
         speaker: Optional[str] = None,
     ) -> TextSegment:
-        """Create a text segment with sentiment analysis."""
+        """Create a text segment with sentiment analysis and duration estimate."""
         sentiment = self._analyze_sentiment(text)
+        wc = len(text.split())
         
         return TextSegment(
             id=str(uuid.uuid4()),
@@ -120,6 +121,8 @@ class TextParser:
             sentiment=sentiment,
             startIndex=start_index,
             endIndex=end_index,
+            wordCount=wc,
+            approxDurationSeconds=round(wc / self.WORDS_PER_SECOND, 1),
         )
     
     def _find_speaker_improved(
@@ -227,6 +230,7 @@ class TextParser:
                 continue
             
             for para_text in paragraphs:
+                wc = len(para_text.split())
                 result.append(TextSegment(
                     id=str(uuid.uuid4()),
                     type=segment.type,
@@ -235,6 +239,8 @@ class TextParser:
                     sentiment=self._analyze_sentiment(para_text),
                     startIndex=segment.startIndex,
                     endIndex=segment.endIndex,
+                    wordCount=wc,
+                    approxDurationSeconds=round(wc / self.WORDS_PER_SECOND, 1),
                 ))
         
         return result
@@ -256,17 +262,20 @@ class TextParser:
             chunks = self._split_text_smart(segment.text, target_words)
             
             for chunk_text in chunks:
-                if not chunk_text.strip():
+                ct = chunk_text.strip()
+                if not ct:
                     continue
-                    
+                wc = len(ct.split())
                 chunked.append(TextSegment(
                     id=str(uuid.uuid4()),
                     type=segment.type,
-                    text=chunk_text.strip(),
+                    text=ct,
                     speaker=segment.speaker,
-                    sentiment=self._analyze_sentiment(chunk_text),
+                    sentiment=self._analyze_sentiment(ct),
                     startIndex=segment.startIndex,
                     endIndex=segment.endIndex,
+                    wordCount=wc,
+                    approxDurationSeconds=round(wc / self.WORDS_PER_SECOND, 1),
                 ))
         
         return chunked
