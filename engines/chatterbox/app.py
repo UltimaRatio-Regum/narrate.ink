@@ -256,7 +256,7 @@ async def convert_text_to_speech(request: Request):
         speaker_wav_path = tmp.name
         temp_files.append(tmp.name)
 
-        text = req.input_text
+        text = req.input_text.strip()
         if len(text) > MAX_CHARS:
             truncated = text[:MAX_CHARS]
             last_space = truncated.rfind(' ')
@@ -264,6 +264,9 @@ async def convert_text_to_speech(request: Request):
                 truncated = truncated[:last_space]
             text = truncated
             logger.warning(f"Text truncated to {len(text)} characters")
+
+        if text and text[-1] not in '.!?;:':
+            text += '.'
 
         dominant_emotion = req.emotion_set[0].lower() if req.emotion_set else "neutral"
         base_exaggeration = EMOTION_EXAGGERATION_MAP.get(dominant_emotion, 0.5)
@@ -296,6 +299,9 @@ async def convert_text_to_speech(request: Request):
         )
 
         audio_np = wav.squeeze().cpu().numpy().astype(np.float32)
+
+        tail_pad = np.zeros(int(SAMPLE_RATE * 0.5), dtype=np.float32)
+        audio_np = np.concatenate([audio_np, tail_pad])
 
         speed_factor = emotion_speed
         if req.speed_adjust != 0.0:
