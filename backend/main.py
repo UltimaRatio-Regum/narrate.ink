@@ -866,25 +866,29 @@ Return ONLY valid JSON."""
                     chunk_segments = []
                     for seg in result.get("segments", []):
                         seg_text = seg.get("text", "")
-                        wc = len(seg_text.split())
                         emotion = seg.get("emotion", seg.get("sentiment", "neutral"))
                         if emotion not in CANONICAL_EMOTIONS:
                             emotion = "neutral"
-                        segment = {
-                            "id": str(uuid.uuid4()),
-                            "type": seg.get("type", "narration"),
-                            "text": seg_text,
-                            "speaker": seg.get("speaker"),
-                            "speakerCandidates": {seg.get("speaker"): 0.9} if seg.get("speaker") else None,
-                            "needsReview": False,
-                            "sentiment": {"label": emotion, "score": 0.8},
-                            "startIndex": 0,
-                            "endIndex": len(seg_text),
-                            "wordCount": wc,
-                            "approxDurationSeconds": round(wc / 2.5, 1),
-                        }
-                        chunk_segments.append(segment)
-                        all_segments.append(segment)
+                        
+                        sub_texts = rechunk_segment(seg_text)
+                        
+                        for st in sub_texts:
+                            wc = len(st.split())
+                            segment = {
+                                "id": str(uuid.uuid4()),
+                                "type": seg.get("type", "narration"),
+                                "text": st,
+                                "speaker": seg.get("speaker"),
+                                "speakerCandidates": {seg.get("speaker"): 0.9} if seg.get("speaker") else None,
+                                "needsReview": False,
+                                "sentiment": {"label": emotion, "score": 0.8},
+                                "startIndex": 0,
+                                "endIndex": len(st),
+                                "wordCount": wc,
+                                "approxDurationSeconds": round(wc / 2.5, 1),
+                            }
+                            chunk_segments.append(segment)
+                            all_segments.append(segment)
                     
                     for speaker in result.get("detectedSpeakers", []):
                         if speaker:
