@@ -60,6 +60,57 @@ EMOTION_CFG_MAP = {
     "melancholy": 0.6,
 }
 
+EMOTION_TEMPERATURE_MAP = {
+    "neutral": 0.8,
+    "happy": 0.85,
+    "sad": 0.7,
+    "angry": 0.9,
+    "fear": 0.85,
+    "fearful": 0.85,
+    "surprise": 0.88,
+    "disgust": 0.75,
+    "excited": 0.92,
+    "calm": 0.6,
+    "confused": 0.78,
+    "anxious": 0.82,
+    "hopeful": 0.78,
+    "melancholy": 0.65,
+}
+
+EMOTION_SPEED_MAP = {
+    "neutral": 1.0,
+    "happy": 1.02,
+    "sad": 0.97,
+    "angry": 1.04,
+    "fear": 1.03,
+    "fearful": 1.03,
+    "surprise": 1.05,
+    "disgust": 0.98,
+    "excited": 1.03,
+    "calm": 0.96,
+    "confused": 0.98,
+    "anxious": 1.02,
+    "hopeful": 1.01,
+    "melancholy": 0.96,
+}
+
+EMOTION_PITCH_MAP = {
+    "neutral": 0.0,
+    "happy": 0.5,
+    "sad": -0.3,
+    "angry": -0.2,
+    "fear": 0.3,
+    "fearful": 0.3,
+    "surprise": 0.6,
+    "disgust": -0.2,
+    "excited": 0.7,
+    "calm": -0.1,
+    "confused": 0.2,
+    "anxious": 0.3,
+    "hopeful": 0.3,
+    "melancholy": -0.4,
+}
+
 CANONICAL_EMOTIONS = [
     "neutral", "happy", "sad", "angry", "fear",
     "surprise", "disgust", "excited", "calm", "confused",
@@ -221,12 +272,19 @@ async def convert_text_to_speech(request: Request):
 
         cfg_weight = EMOTION_CFG_MAP.get(dominant_emotion, 0.5)
 
-        temperature = 0.8
+        temperature = EMOTION_TEMPERATURE_MAP.get(dominant_emotion, 0.8)
+
+        emotion_speed = EMOTION_SPEED_MAP.get(dominant_emotion, 1.0)
+        emotion_pitch = EMOTION_PITCH_MAP.get(dominant_emotion, 0.0)
+
+        emotion_speed = 1.0 + (emotion_speed - 1.0) * intensity_factor
+        emotion_pitch = emotion_pitch * intensity_factor
 
         logger.info(
             f"Generating with Chatterbox: emotion={dominant_emotion}, "
             f"exaggeration={exaggeration:.2f}, cfg={cfg_weight:.2f}, "
-            f"text_len={len(text)}"
+            f"temperature={temperature:.2f}, emotion_speed={emotion_speed:.3f}, "
+            f"emotion_pitch={emotion_pitch:.2f}, text_len={len(text)}"
         )
 
         wav = tts_model.generate(
@@ -239,15 +297,19 @@ async def convert_text_to_speech(request: Request):
 
         audio_np = wav.squeeze().cpu().numpy().astype(np.float32)
 
+        speed_factor = emotion_speed
         if req.speed_adjust != 0.0:
-            speed_factor = 1.0 + (req.speed_adjust / 100.0)
-            speed_factor = max(0.5, min(2.0, speed_factor))
-            if abs(speed_factor - 1.0) > 0.01:
-                audio_np = pyrb.time_stretch(audio_np, SAMPLE_RATE, speed_factor)
+            user_speed = 1.0 + (req.speed_adjust / 100.0)
+            speed_factor = speed_factor * user_speed
+        speed_factor = max(0.5, min(2.0, speed_factor))
+        if abs(speed_factor - 1.0) > 0.01:
+            audio_np = pyrb.time_stretch(audio_np, SAMPLE_RATE, speed_factor)
 
+        total_pitch = emotion_pitch
         if req.pitch_adjust != 0.0:
-            semitones = req.pitch_adjust * 0.24
-            audio_np = pyrb.pitch_shift(audio_np, SAMPLE_RATE, semitones)
+            total_pitch += req.pitch_adjust * 0.24
+        if abs(total_pitch) > 0.01:
+            audio_np = pyrb.pitch_shift(audio_np, SAMPLE_RATE, total_pitch)
 
         vol_factor = req.volume / 75.0
         audio_np = audio_np * vol_factor

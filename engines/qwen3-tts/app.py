@@ -37,6 +37,40 @@ BUILTIN_SPEAKERS = [
     {"id": "Sohee", "display_name": "Sohee", "extra_info": "Warm Korean female voice with rich emotion (Korean native)"},
 ]
 
+EMOTION_SPEED_MAP = {
+    "neutral":    1.0,
+    "happy":      1.02,
+    "sad":        0.98,
+    "angry":      1.03,
+    "fear":       1.02,
+    "surprise":   1.02,
+    "excited":    1.03,
+    "calm":       0.97,
+    "disgust":    1.01,
+    "confused":   0.99,
+    "anxious":    1.02,
+    "hopeful":    1.01,
+    "melancholy": 0.97,
+    "fearful":    1.02,
+}
+
+EMOTION_PITCH_MAP = {
+    "neutral":    0.0,
+    "happy":      0.3,
+    "sad":       -0.2,
+    "angry":     -0.15,
+    "fear":       0.2,
+    "surprise":   0.4,
+    "excited":    0.4,
+    "calm":       0.0,
+    "disgust":   -0.1,
+    "confused":   0.15,
+    "anxious":    0.2,
+    "hopeful":    0.2,
+    "melancholy":-0.2,
+    "fearful":    0.2,
+}
+
 EMOTION_TO_INSTRUCT = {
     "neutral": {"base": "", "slight": "", "strong": ""},
     "happy": {
@@ -173,10 +207,10 @@ class ConvertRequest(BaseModel):
     voice_to_clone_sample: Optional[str] = None
     random_seed: Optional[int] = None
     emotion_set: list[str] = Field(default_factory=lambda: ["neutral"])
-    intensity: int = 50
-    volume: int = 75
-    speed_adjust: float = 0.0
-    pitch_adjust: float = 0.0
+    intensity: int = Field(default=50, ge=1, le=100)
+    volume: int = Field(default=75, ge=1, le=100)
+    speed_adjust: float = Field(default=0.0, ge=-5.0, le=5.0)
+    pitch_adjust: float = Field(default=0.0, ge=-5.0, le=5.0)
 
 
 @app.post("/GetEngineDetails")
@@ -252,6 +286,7 @@ async def convert_text_to_speech(request: Request):
 
     try:
         instruct = ""
+        dominant = "neutral"
         if req.emotion_set:
             dominant = req.emotion_set[0]
             emotion_entry = EMOTION_TO_INSTRUCT.get(dominant, None)
@@ -262,6 +297,17 @@ async def convert_text_to_speech(request: Request):
                     instruct = emotion_entry["slight"]
                 else:
                     instruct = emotion_entry["base"]
+
+        intensity_scale = req.intensity / 50.0
+        emotion_speed_base = EMOTION_SPEED_MAP.get(dominant, 1.0)
+        emotion_speed = 1.0 + (emotion_speed_base - 1.0) * intensity_scale
+        emotion_pitch = EMOTION_PITCH_MAP.get(dominant, 0.0) * intensity_scale
+
+        logger.info(
+            f"Emotion params: dominant={dominant}, instruct='{instruct}', "
+            f"emotion_speed={emotion_speed:.3f}, emotion_pitch={emotion_pitch:.2f}, "
+            f"intensity={req.intensity}"
+        )
 
         if req.voice_to_clone_sample:
             ref_audio_b64 = req.voice_to_clone_sample
@@ -290,14 +336,16 @@ async def convert_text_to_speech(request: Request):
         if max_val > 0:
             audio_np = audio_np / max_val
 
-        speed = 1.0 + (req.speed_adjust / 100.0)
+        user_speed = 1.0 + (req.speed_adjust / 100.0)
+        speed = emotion_speed * user_speed
         speed = max(0.5, min(2.0, speed))
         if speed != 1.0:
             audio_np = pyrb.time_stretch(audio_np, sr, speed)
 
-        if req.pitch_adjust != 0.0:
-            semitones = req.pitch_adjust * 0.24
-            audio_np = pyrb.pitch_shift(audio_np, sr, semitones)
+        user_pitch_semitones = req.pitch_adjust * 0.24
+        total_pitch = emotion_pitch + user_pitch_semitones
+        if total_pitch != 0.0:
+            audio_np = pyrb.pitch_shift(audio_np, sr, total_pitch)
 
         vol_factor = req.volume / 75.0
         audio_np = audio_np * vol_factor

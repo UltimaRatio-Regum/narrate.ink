@@ -24,6 +24,46 @@ BIT_DEPTH = 16
 CHANNELS = 1
 MAX_SECONDS = 30
 
+CANONICAL_EMOTIONS = [
+    "neutral", "happy", "sad", "angry", "fear",
+    "surprise", "disgust", "excited", "calm", "confused",
+    "anxious", "hopeful", "melancholy", "fearful",
+]
+
+EMOTION_SPEED_MAP = {
+    "neutral":    1.0,
+    "happy":      1.05,
+    "sad":        0.93,
+    "angry":      1.08,
+    "fear":       1.06,
+    "surprise":   1.07,
+    "disgust":    0.97,
+    "excited":    1.10,
+    "calm":       0.92,
+    "confused":   0.96,
+    "anxious":    1.04,
+    "hopeful":    1.02,
+    "melancholy": 0.94,
+    "fearful":    1.06,
+}
+
+EMOTION_PITCH_MAP = {
+    "neutral":    0.0,
+    "happy":      0.6,
+    "sad":       -0.5,
+    "angry":     -0.3,
+    "fear":       0.4,
+    "surprise":   0.7,
+    "disgust":   -0.2,
+    "excited":    0.8,
+    "calm":       0.0,
+    "confused":   0.3,
+    "anxious":    0.3,
+    "hopeful":    0.4,
+    "melancholy":-0.4,
+    "fearful":    0.4,
+}
+
 BUILTIN_SPEAKERS = {
     "EN": [
         {"id": "en-default", "display_name": "English Default", "extra_info": "Standard English voice", "lang": "EN_NEWEST", "spk_key": "en-newest"},
@@ -145,10 +185,10 @@ class ConvertRequest(BaseModel):
     voice_to_clone_sample: Optional[str] = None
     random_seed: Optional[int] = None
     emotion_set: list[str] = Field(default_factory=lambda: ["neutral"])
-    intensity: int = 50
-    volume: int = 75
-    speed_adjust: float = 0.0
-    pitch_adjust: float = 0.0
+    intensity: int = Field(default=50, ge=1, le=100)
+    volume: int = Field(default=75, ge=1, le=100)
+    speed_adjust: float = Field(default=0.0, ge=-5.0, le=5.0)
+    pitch_adjust: float = Field(default=0.0, ge=-5.0, le=5.0)
 
 
 @app.post("/GetEngineDetails")
@@ -166,7 +206,7 @@ async def get_engine_details(request: Request):
         "max_seconds_per_conversion": MAX_SECONDS,
         "supports_voice_cloning": True,
         "builtin_voices": ALL_VOICES,
-        "supported_emotions": [],
+        "supported_emotions": CANONICAL_EMOTIONS,
         "extra_properties": {
             "architecture": "MeloTTS base + ToneColorConverter for voice cloning",
             "languages": ["English", "Spanish", "French", "Chinese", "Japanese", "Korean"],
@@ -230,8 +270,24 @@ async def convert_text_to_speech(request: Request):
                 content={"error": f"TTS model for language {lang_key} not loaded", "error_code": "GENERATION_FAILED"}
             )
 
-        speed = 1.0 + (req.speed_adjust / 100.0)
+        dominant_emotion = req.emotion_set[0].lower() if req.emotion_set else "neutral"
+        if dominant_emotion not in EMOTION_SPEED_MAP:
+            dominant_emotion = "neutral"
+
+        intensity_scale = req.intensity / 50.0
+        emotion_speed_raw = EMOTION_SPEED_MAP[dominant_emotion]
+        emotion_speed = 1.0 + (emotion_speed_raw - 1.0) * intensity_scale
+        emotion_pitch_raw = EMOTION_PITCH_MAP[dominant_emotion]
+        emotion_pitch = emotion_pitch_raw * intensity_scale
+
+        speed = emotion_speed * (1.0 + (req.speed_adjust / 100.0))
         speed = max(0.5, min(2.0, speed))
+
+        logger.info(
+            f"Emotion: {dominant_emotion}, intensity: {req.intensity}, "
+            f"emotion_speed: {emotion_speed:.3f}, emotion_pitch: {emotion_pitch:.2f}, "
+            f"final_speed: {speed:.3f}"
+        )
 
         spk2id = melo_model.hps.data.spk2id
         melo_lang = voice_info["lang"]
@@ -326,9 +382,9 @@ async def convert_text_to_speech(request: Request):
         if max_val > 0:
             audio_np = audio_np / max_val
 
-        if req.pitch_adjust != 0.0:
-            semitones = req.pitch_adjust * 0.24
-            audio_np = pyrb.pitch_shift(audio_np, file_sr, semitones)
+        total_pitch = emotion_pitch + (req.pitch_adjust * 0.24)
+        if total_pitch != 0.0:
+            audio_np = pyrb.pitch_shift(audio_np, file_sr, total_pitch)
 
         vol_factor = req.volume / 75.0
         audio_np = audio_np * vol_factor

@@ -189,10 +189,12 @@ The response body is the raw bytes of a PCM-encoded WAV file. The audio format (
 
 3. **Voice cloning parameter:** Even if your engine does not support voice cloning, your `ConvertTextToSpeech` endpoint must accept the `voice_to_clone_sample` parameter without error. Simply ignore it if cloning is not supported.
 
-4. **Emotion handling:** Engines can handle the `emotion_set` in three ways:
-   - **Native emotion support:** Map the provided emotions to the engine's internal emotion system and use them directly. In this case, `speed_adjust` and `pitch_adjust` may be ignored.
-   - **Prosody-only:** Ignore `emotion_set` and `intensity`, apply only `speed_adjust`, `pitch_adjust`, and `volume` as mechanical adjustments.
-   - **Hybrid:** Use emotions for expressive generation and also apply mechanical adjustments.
+4. **Emotion handling:** Every engine **must** accept `emotion_set` and `intensity` and map them internally. The engine is responsible for translating emotion words into its own parameter space. Three strategies:
+   - **Native parameter mapping:** Map the emotion to engine-specific generation parameters (e.g., Chatterbox maps to exaggeration + cfg_weight + temperature; StyleTTS2 maps to diffusion presets alpha/beta/embedding_scale).
+   - **Instruct/prompt-based:** Pass the emotion as a text instruction to the model (e.g., Qwen3-TTS uses instruct prompts like "Speak with a happy, cheerful tone").
+   - **Prosody emulation:** For engines without native emotion support, map emotions to speed and pitch adjustments (e.g., XTTSv2 and OpenVoice V2 use per-emotion speed multipliers and pitch semitone offsets).
+   
+   All engines should also apply **prosody reinforcement** — subtle speed/pitch adjustments layered on top of native emotion controls — so the emotion is expressed through both the model's native capabilities and post-processing. User `speed_adjust` and `pitch_adjust` values are additive on top of the engine's emotion-derived adjustments. The `intensity` parameter (1-100, default 50) scales how strongly the emotion affects generation parameters.
 
 5. **Idempotency:** When `random_seed` is provided with the same value, the engine should produce identical output (if the underlying model supports deterministic generation).
 

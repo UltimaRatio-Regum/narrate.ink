@@ -26,17 +26,67 @@ BIT_DEPTH = 16
 CHANNELS = 1
 MAX_SECONDS = 60
 
+CANONICAL_EMOTIONS = [
+    "neutral", "happy", "sad", "angry", "fear",
+    "surprise", "disgust", "excited", "calm", "confused",
+    "anxious", "hopeful", "melancholy", "fearful",
+]
+
 EMOTION_PRESETS = {
-    "neutral": {"alpha": 0.3, "beta": 0.7, "embedding_scale": 1, "diffusion_steps": 5},
-    "happy": {"alpha": 0.1, "beta": 0.9, "embedding_scale": 2, "diffusion_steps": 10},
-    "sad": {"alpha": 0.1, "beta": 0.9, "embedding_scale": 2, "diffusion_steps": 10},
-    "angry": {"alpha": 0.1, "beta": 0.9, "embedding_scale": 2, "diffusion_steps": 10},
-    "fear": {"alpha": 0.1, "beta": 0.9, "embedding_scale": 2, "diffusion_steps": 10},
-    "excited": {"alpha": 0.05, "beta": 0.95, "embedding_scale": 2.5, "diffusion_steps": 10},
-    "calm": {"alpha": 0.5, "beta": 0.5, "embedding_scale": 1, "diffusion_steps": 5},
-    "surprise": {"alpha": 0.1, "beta": 0.9, "embedding_scale": 2, "diffusion_steps": 10},
-    "surprised": {"alpha": 0.1, "beta": 0.9, "embedding_scale": 2, "diffusion_steps": 10},
-    "whisper": {"alpha": 0.5, "beta": 0.3, "embedding_scale": 0.5, "diffusion_steps": 10},
+    "neutral":   {"alpha": 0.3,  "beta": 0.7,  "embedding_scale": 1,   "diffusion_steps": 5},
+    "happy":     {"alpha": 0.1,  "beta": 0.9,  "embedding_scale": 2,   "diffusion_steps": 10},
+    "sad":       {"alpha": 0.1,  "beta": 0.9,  "embedding_scale": 2,   "diffusion_steps": 10},
+    "angry":     {"alpha": 0.1,  "beta": 0.9,  "embedding_scale": 2,   "diffusion_steps": 10},
+    "fear":      {"alpha": 0.1,  "beta": 0.9,  "embedding_scale": 2,   "diffusion_steps": 10},
+    "excited":   {"alpha": 0.05, "beta": 0.95, "embedding_scale": 2.5, "diffusion_steps": 10},
+    "calm":      {"alpha": 0.5,  "beta": 0.5,  "embedding_scale": 1,   "diffusion_steps": 5},
+    "surprise":  {"alpha": 0.1,  "beta": 0.9,  "embedding_scale": 2,   "diffusion_steps": 10},
+    "surprised": {"alpha": 0.1,  "beta": 0.9,  "embedding_scale": 2,   "diffusion_steps": 10},
+    "whisper":   {"alpha": 0.5,  "beta": 0.3,  "embedding_scale": 0.5, "diffusion_steps": 10},
+    "confused":  {"alpha": 0.2,  "beta": 0.8,  "embedding_scale": 1.5, "diffusion_steps": 8},
+    "anxious":   {"alpha": 0.15, "beta": 0.85, "embedding_scale": 1.8, "diffusion_steps": 10},
+    "hopeful":   {"alpha": 0.2,  "beta": 0.8,  "embedding_scale": 1.8, "diffusion_steps": 8},
+    "melancholy":{"alpha": 0.15, "beta": 0.85, "embedding_scale": 1.8, "diffusion_steps": 10},
+    "fearful":   {"alpha": 0.1,  "beta": 0.9,  "embedding_scale": 2,   "diffusion_steps": 10},
+    "disgust":   {"alpha": 0.1,  "beta": 0.9,  "embedding_scale": 2,   "diffusion_steps": 10},
+}
+
+EMOTION_SPEED_MAP = {
+    "neutral":    1.0,
+    "happy":      1.04,
+    "sad":        0.94,
+    "angry":      1.06,
+    "fear":       1.05,
+    "excited":    1.08,
+    "calm":       0.94,
+    "surprise":   1.05,
+    "surprised":  1.05,
+    "whisper":    0.92,
+    "confused":   0.97,
+    "anxious":    1.04,
+    "hopeful":    1.02,
+    "melancholy": 0.93,
+    "fearful":    1.05,
+    "disgust":    0.98,
+}
+
+EMOTION_PITCH_MAP = {
+    "neutral":    0.0,
+    "happy":      0.5,
+    "sad":       -0.4,
+    "angry":     -0.3,
+    "fear":       0.3,
+    "excited":    0.7,
+    "calm":       0.0,
+    "surprise":   0.6,
+    "surprised":  0.6,
+    "whisper":   -0.2,
+    "confused":   0.2,
+    "anxious":    0.3,
+    "hopeful":    0.3,
+    "melancholy":-0.3,
+    "fearful":    0.3,
+    "disgust":   -0.2,
 }
 
 tts_engine = None
@@ -110,10 +160,10 @@ class ConvertRequest(BaseModel):
     voice_to_clone_sample: Optional[str] = None
     random_seed: Optional[int] = None
     emotion_set: list[str] = Field(default_factory=lambda: ["neutral"])
-    intensity: int = 50
-    volume: int = 75
-    speed_adjust: float = 0.0
-    pitch_adjust: float = 0.0
+    intensity: int = Field(default=50, ge=1, le=100)
+    volume: int = Field(default=75, ge=1, le=100)
+    speed_adjust: float = Field(default=0.0, ge=-5.0, le=5.0)
+    pitch_adjust: float = Field(default=0.0, ge=-5.0, le=5.0)
 
 
 @app.post("/GetEngineDetails")
@@ -131,7 +181,7 @@ async def get_engine_details(request: Request):
         "max_seconds_per_conversion": MAX_SECONDS,
         "supports_voice_cloning": True,
         "builtin_voices": [],
-        "supported_emotions": ["neutral", "happy", "sad", "angry", "fear", "excited", "calm", "surprise", "whisper"],
+        "supported_emotions": CANONICAL_EMOTIONS,
         "extra_properties": {
             "architecture": "Style diffusion + adversarial training with large SLMs",
             "model": "LibriTTS multi-speaker",
@@ -181,10 +231,21 @@ async def convert_text_to_speech(request: Request):
 
         preset = EMOTION_PRESETS[emotion].copy()
 
+        intensity_scale = req.intensity / 50.0
+
         if req.intensity != 50:
-            scale_factor = req.intensity / 50.0
-            preset["embedding_scale"] = preset["embedding_scale"] * scale_factor
+            preset["embedding_scale"] = preset["embedding_scale"] * intensity_scale
             preset["embedding_scale"] = max(0.1, min(5.0, preset["embedding_scale"]))
+
+        base_emotion_speed = EMOTION_SPEED_MAP.get(emotion, 1.0)
+        emotion_speed = 1.0 + (base_emotion_speed - 1.0) * intensity_scale
+        base_emotion_pitch = EMOTION_PITCH_MAP.get(emotion, 0.0)
+        emotion_pitch = base_emotion_pitch * intensity_scale
+
+        logger.info(
+            f"StyleTTS2 emotion={emotion}, intensity={req.intensity}, "
+            f"preset={preset}, emotion_speed={emotion_speed:.3f}, emotion_pitch={emotion_pitch:.2f}"
+        )
 
         ref_wav_path = None
         if req.voice_to_clone_sample:
@@ -248,14 +309,14 @@ async def convert_text_to_speech(request: Request):
         if max_val > 0:
             audio_np = audio_np / max_val
 
-        if req.speed_adjust != 0.0:
-            speed_factor = 1.0 + (req.speed_adjust / 100.0)
-            speed_factor = max(0.5, min(2.0, speed_factor))
-            audio_np = pyrb.time_stretch(audio_np, SAMPLE_RATE, speed_factor)
+        combined_speed = emotion_speed * (1.0 + (req.speed_adjust / 100.0))
+        combined_speed = max(0.5, min(2.0, combined_speed))
+        if abs(combined_speed - 1.0) > 0.01:
+            audio_np = pyrb.time_stretch(audio_np, SAMPLE_RATE, combined_speed)
 
-        if req.pitch_adjust != 0.0:
-            semitones = req.pitch_adjust * 0.24
-            audio_np = pyrb.pitch_shift(audio_np, SAMPLE_RATE, semitones)
+        combined_pitch = emotion_pitch + (req.pitch_adjust * 0.24)
+        if abs(combined_pitch) > 0.01:
+            audio_np = pyrb.pitch_shift(audio_np, SAMPLE_RATE, combined_pitch)
 
         vol_factor = req.volume / 75.0
         audio_np = audio_np * vol_factor

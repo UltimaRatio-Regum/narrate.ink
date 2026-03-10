@@ -30,6 +30,46 @@ BUILTIN_VOICES = [
     {"id": "Ethan", "display_name": "Ethan", "extra_info": "Male voice, confident and steady"},
 ]
 
+CANONICAL_EMOTIONS = [
+    "neutral", "happy", "sad", "angry", "fear", "surprise",
+    "excited", "calm", "confused", "anxious", "hopeful",
+    "melancholy", "fearful", "disgust"
+]
+
+EMOTION_SPEED_MAP = {
+    "neutral":    1.0,
+    "happy":      1.05,
+    "sad":        0.93,
+    "angry":      1.08,
+    "fear":       1.06,
+    "surprise":   1.07,
+    "excited":    1.10,
+    "calm":       0.92,
+    "confused":   0.97,
+    "anxious":    1.04,
+    "hopeful":    1.02,
+    "melancholy": 0.94,
+    "fearful":    1.06,
+    "disgust":    0.98,
+}
+
+EMOTION_PITCH_MAP = {
+    "neutral":    0.0,
+    "happy":      0.6,
+    "sad":       -0.5,
+    "angry":     -0.3,
+    "fear":       0.4,
+    "surprise":   0.8,
+    "excited":    0.8,
+    "calm":       0.0,
+    "confused":   0.3,
+    "anxious":    0.3,
+    "hopeful":    0.4,
+    "melancholy": -0.4,
+    "fearful":    0.4,
+    "disgust":   -0.2,
+}
+
 model = None
 processor = None
 
@@ -100,10 +140,10 @@ class ConvertRequest(BaseModel):
     voice_to_clone_sample: Optional[str] = None
     random_seed: Optional[int] = None
     emotion_set: list[str] = Field(default_factory=lambda: ["neutral"])
-    intensity: int = 50
-    volume: int = 75
-    speed_adjust: float = 0.0
-    pitch_adjust: float = 0.0
+    intensity: int = Field(default=50, ge=1, le=100)
+    volume: int = Field(default=75, ge=1, le=100)
+    speed_adjust: float = Field(default=0.0, ge=-5.0, le=5.0)
+    pitch_adjust: float = Field(default=0.0, ge=-5.0, le=5.0)
 
 
 @app.post("/GetEngineDetails")
@@ -119,10 +159,7 @@ async def get_engine_details(request: Request):
         "max_seconds_per_conversion": MAX_SECONDS,
         "supports_voice_cloning": True,
         "builtin_voices": BUILTIN_VOICES,
-        "supported_emotions": [
-            "neutral", "happy", "sad", "angry", "fear",
-            "surprise", "excited", "calm"
-        ],
+        "supported_emotions": CANONICAL_EMOTIONS,
         "extra_properties": {
             "model": MODEL_ID,
             "languages": [
@@ -251,14 +288,27 @@ async def convert_text_to_speech(request: Request):
         if max_val > 0:
             audio_np = audio_np / max_val
 
-        speed = 1.0 + (req.speed_adjust / 100.0)
+        dominant_emotion = req.emotion_set[0] if req.emotion_set else "neutral"
+        emotion_speed_factor = EMOTION_SPEED_MAP.get(dominant_emotion, 1.0)
+        emotion_pitch_offset = EMOTION_PITCH_MAP.get(dominant_emotion, 0.0)
+
+        intensity_scale = req.intensity / 50.0
+        scaled_emotion_speed = 1.0 + (emotion_speed_factor - 1.0) * intensity_scale
+        scaled_emotion_pitch = emotion_pitch_offset * intensity_scale
+
+        logger.info(
+            f"Emotion prosody: emotion={dominant_emotion}, intensity={req.intensity}, "
+            f"emotion_speed={scaled_emotion_speed:.3f}, emotion_pitch={scaled_emotion_pitch:.2f}"
+        )
+
+        speed = scaled_emotion_speed * (1.0 + (req.speed_adjust / 100.0))
         speed = max(0.5, min(2.0, speed))
         if speed != 1.0:
             audio_np = pyrb.time_stretch(audio_np, SAMPLE_RATE, speed)
 
-        if req.pitch_adjust != 0.0:
-            semitones = req.pitch_adjust * 0.24
-            audio_np = pyrb.pitch_shift(audio_np, SAMPLE_RATE, semitones)
+        total_pitch_semitones = scaled_emotion_pitch + (req.pitch_adjust * 0.24)
+        if total_pitch_semitones != 0.0:
+            audio_np = pyrb.pitch_shift(audio_np, SAMPLE_RATE, total_pitch_semitones)
 
         vol_factor = req.volume / 75.0
         audio_np = audio_np * vol_factor
