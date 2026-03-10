@@ -59,7 +59,7 @@ export function ProjectDetailPanel({ selection, project, onRefresh }: ProjectDet
 
   const allEngines = [
     ...TTS_ENGINES.map((e) => ({ id: e.id, label: e.label })),
-    ...registeredEngines.map((e: any) => ({ id: e.id || e.name, label: e.name || e.id })),
+    ...registeredEngines.map((e: any) => ({ id: e.engine_id || e.id, label: e.engine_name || e.name || e.engine_id || e.id })),
   ];
 
   const allVoices = [
