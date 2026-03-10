@@ -2,7 +2,7 @@
 title: VoxLibris OpenVoice V2 Engine
 emoji: 🎙️
 colorFrom: yellow
-colorTo: orange
+colorTo: green
 sdk: docker
 app_port: 7860
 pinned: false
