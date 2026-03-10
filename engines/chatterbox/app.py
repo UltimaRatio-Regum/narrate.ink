@@ -160,6 +160,117 @@ def numpy_to_wav_bytes(audio_np: np.ndarray, sample_rate: int) -> bytes:
     return buf.getvalue()
 
 
+WORDS_PER_MINUTE = 155
+SILENCE_THRESHOLD_DB = -40
+MIN_SILENCE_DURATION_SEC = 0.3
+TAIL_PAD_SEC = 0.25
+
+
+def estimate_speech_duration(text: str) -> float:
+    words = len(text.split())
+    base_seconds = (words / WORDS_PER_MINUTE) * 60.0
+    return max(1.0, base_seconds)
+
+
+def find_speech_end(audio_np: np.ndarray, sample_rate: int, threshold_db: float = SILENCE_THRESHOLD_DB) -> int:
+    threshold_linear = 10.0 ** (threshold_db / 20.0)
+
+    window_size = int(sample_rate * 0.02)
+    abs_audio = np.abs(audio_np)
+
+    i = len(abs_audio) - 1
+    while i >= window_size:
+        window = abs_audio[max(0, i - window_size):i]
+        rms = np.sqrt(np.mean(window ** 2))
+        if rms > threshold_linear:
+            return i
+        i -= window_size // 2
+
+    return len(audio_np)
+
+
+def find_last_silence_gap(audio_np: np.ndarray, sample_rate: int,
+                          min_expected_samples: int,
+                          threshold_db: float = SILENCE_THRESHOLD_DB,
+                          min_gap_sec: float = MIN_SILENCE_DURATION_SEC) -> int:
+    threshold_linear = 10.0 ** (threshold_db / 20.0)
+    min_gap_samples = int(sample_rate * min_gap_sec)
+    window_size = int(sample_rate * 0.02)
+    abs_audio = np.abs(audio_np)
+
+    search_start = max(min_expected_samples, len(audio_np) // 2)
+
+    best_gap_end = len(audio_np)
+    silent_run = 0
+    i = len(abs_audio) - 1
+
+    while i >= search_start:
+        window = abs_audio[max(0, i - window_size):i]
+        rms = np.sqrt(np.mean(window ** 2))
+        if rms <= threshold_linear:
+            silent_run += window_size // 2
+            if silent_run >= min_gap_samples:
+                best_gap_end = i + (window_size // 2)
+        else:
+            if silent_run >= min_gap_samples:
+                best_gap_end = i + silent_run
+                break
+            silent_run = 0
+        i -= window_size // 2
+
+    return best_gap_end
+
+
+def smart_trim_audio(audio_np: np.ndarray, sample_rate: int, text: str) -> np.ndarray:
+    expected_sec = estimate_speech_duration(text)
+    actual_sec = len(audio_np) / sample_rate
+
+    logger.info(
+        f"Audio trim: expected={expected_sec:.1f}s, actual={actual_sec:.1f}s, "
+        f"samples={len(audio_np)}"
+    )
+
+    speech_end = find_speech_end(audio_np, sample_rate)
+    speech_end_sec = speech_end / sample_rate
+    logger.info(f"Speech end detected at {speech_end_sec:.2f}s (sample {speech_end})")
+
+    if actual_sec > expected_sec * 1.5:
+        min_expected_samples = int(expected_sec * 0.7 * sample_rate)
+        gap_end = find_last_silence_gap(audio_np, sample_rate, min_expected_samples)
+        gap_end_sec = gap_end / sample_rate
+        logger.info(f"Last silence gap boundary at {gap_end_sec:.2f}s")
+
+        trim_point = min(speech_end, gap_end)
+    else:
+        trim_point = speech_end
+
+    pad_samples = int(sample_rate * TAIL_PAD_SEC)
+    trim_point = min(trim_point + pad_samples, len(audio_np))
+
+    if trim_point < len(audio_np) * 0.3:
+        logger.warning(
+            f"Trim point ({trim_point / sample_rate:.2f}s) is less than 30% of audio, "
+            f"keeping full audio to avoid cutting real speech"
+        )
+        trim_point = len(audio_np)
+
+    if trim_point < len(audio_np):
+        fade_samples = min(int(sample_rate * 0.05), trim_point)
+        fade = np.linspace(1.0, 0.0, fade_samples, dtype=np.float32)
+        audio_np[trim_point - fade_samples:trim_point] *= fade
+
+    result = audio_np[:trim_point]
+    tail_pad = np.zeros(int(sample_rate * TAIL_PAD_SEC), dtype=np.float32)
+    result = np.concatenate([result, tail_pad])
+
+    logger.info(
+        f"Final audio: {len(result) / sample_rate:.2f}s "
+        f"(trimmed from {actual_sec:.2f}s)"
+    )
+
+    return result
+
+
 class ConvertRequest(BaseModel):
     input_text: str
     builtin_voice_id: Optional[str] = None
@@ -300,8 +411,7 @@ async def convert_text_to_speech(request: Request):
 
         audio_np = wav.squeeze().cpu().numpy().astype(np.float32)
 
-        tail_pad = np.zeros(int(SAMPLE_RATE * 0.5), dtype=np.float32)
-        audio_np = np.concatenate([audio_np, tail_pad])
+        audio_np = smart_trim_audio(audio_np, SAMPLE_RATE, text)
 
         speed_factor = emotion_speed
         if req.speed_adjust != 0.0:
