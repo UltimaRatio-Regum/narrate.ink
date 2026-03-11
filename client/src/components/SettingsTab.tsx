@@ -412,6 +412,9 @@ export function SettingsTab() {
   const [testingEngineId, setTestingEngineId] = useState<string | null>(null);
   const [playingVoiceId, setPlayingVoiceId] = useState<string | null>(null);
 
+  const [parsingPromptText, setParsingPromptText] = useState("");
+  const [parsingPromptLoaded, setParsingPromptLoaded] = useState(false);
+
 
   const { data: prosodyData } = useQuery<ProsodySettings>({
     queryKey: ["/api/prosody-settings"],
@@ -435,6 +438,52 @@ export function SettingsTab() {
 
   const { data: voiceLibraryDb, isLoading: voiceLibLoading } = useQuery<VoiceLibraryItem[]>({
     queryKey: ["/api/voice-library-db"],
+  });
+
+  const { data: savedPromptData } = useQuery<{ prompt: string; isCustom: boolean }>({
+    queryKey: ["/api/parsing-prompt"],
+  });
+
+  const { data: defaultPromptData } = useQuery<{ prompt: string }>({
+    queryKey: ["/api/parsing-prompt/default"],
+  });
+
+  useEffect(() => {
+    if (!parsingPromptLoaded && savedPromptData && defaultPromptData) {
+      setParsingPromptText(savedPromptData.isCustom ? savedPromptData.prompt : defaultPromptData.prompt);
+      setParsingPromptLoaded(true);
+    }
+  }, [savedPromptData, defaultPromptData, parsingPromptLoaded]);
+
+  const saveParsingPromptMutation = useMutation({
+    mutationFn: async (prompt: string) => {
+      const response = await apiRequest("POST", "/api/parsing-prompt", { prompt });
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/parsing-prompt"] });
+      toast({ title: "Parsing prompt saved", description: "Your custom prompt will be used for future text analysis." });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to save prompt", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const resetParsingPromptMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("DELETE", "/api/parsing-prompt");
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/parsing-prompt"] });
+      if (defaultPromptData) {
+        setParsingPromptText(defaultPromptData.prompt);
+      }
+      toast({ title: "Prompt reset", description: "Parsing prompt has been reset to the default." });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to reset prompt", description: error.message, variant: "destructive" });
+    },
   });
 
   useEffect(() => {
@@ -1111,6 +1160,56 @@ export function SettingsTab() {
             <p><strong>Speed:</strong> Factor multiplier (0.5 to 2.0). 1.0 = normal speed.</p>
             <p><strong>Volume:</strong> Amplitude multiplier (0.3 to 2.0). 1.0 = normal volume.</p>
             <p><strong>Intensity:</strong> Chatterbox emotion exaggeration (0.0 to 1.0). Higher = more expressive.</p>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div>
+              <CardTitle>Parsing & Speaker Identification Prompt</CardTitle>
+              <CardDescription>
+                Customize the system prompt used by the LLM for text chunking, speaker identification, and emotion assignment
+              </CardDescription>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => resetParsingPromptMutation.mutate()}
+                disabled={resetParsingPromptMutation.isPending}
+                data-testid="button-reset-parsing-prompt"
+              >
+                <RotateCcw className="h-4 w-4 mr-1" />
+                Reset to Default
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => saveParsingPromptMutation.mutate(parsingPromptText)}
+                disabled={saveParsingPromptMutation.isPending || !parsingPromptLoaded}
+                data-testid="button-save-parsing-prompt"
+              >
+                <Save className="h-4 w-4 mr-1" />
+                Save
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {savedPromptData?.isCustom && (
+            <Badge variant="secondary" className="mb-3">Custom prompt active</Badge>
+          )}
+          <textarea
+            className="w-full min-h-[400px] p-3 rounded-md border bg-background text-sm font-mono resize-y focus:outline-none focus:ring-2 focus:ring-ring"
+            value={parsingPromptText}
+            onChange={(e) => setParsingPromptText(e.target.value)}
+            placeholder="Loading prompt..."
+            data-testid="textarea-parsing-prompt"
+          />
+          <div className="mt-3 text-sm text-muted-foreground space-y-1">
+            <p>This prompt controls how the LLM segments text into chunks, identifies speakers in dialogue, and assigns emotions. Changes take effect on the next text analysis.</p>
+            <p>Use <code className="text-xs bg-muted px-1 py-0.5 rounded">$&#123;VALID_EMOTIONS&#125;</code> in the prompt to automatically insert the list of available emotions.</p>
           </div>
         </CardContent>
       </Card>

@@ -288,7 +288,7 @@ const VALID_EMOTIONS = [
   "excited", "calm", "anxious", "hopeful", "melancholy", "tender", "proud",
 ] as const;
 
-const SYSTEM_PROMPT = `You are chunking text for a text-to-speech audiobook engine. Each segment will be sent to a TTS engine as a separate audio clip, so segment size directly controls audio quality.
+const DEFAULT_SYSTEM_PROMPT = `You are chunking text for a text-to-speech audiobook engine. Each segment will be sent to a TTS engine as a separate audio clip, so segment size directly controls audio quality.
 
 TARGET: Each segment must be 20-30 words (8-12 seconds of speech at 2.5 words/second). This is critical — TTS engines produce poor quality on long inputs.
 
@@ -302,9 +302,21 @@ SEGMENTATION RULES (in priority order):
 4. TRANSITIONS: ALWAYS split at transitions between speaking and narrating.
 5. TYPE: Each segment is either "spoken" (dialogue in quotes) or "narration" (everything else).
 
-SPEAKER IDENTIFICATION:
-- For spoken segments, identify the speaker from context clues (dialogue tags like "said John", or contextual inference)
-- Provide confidence scores for each possible speaker (values 0-1, must sum to 1)
+SPEAKER IDENTIFICATION — CRITICAL:
+You MUST identify a speaker for EVERY spoken segment. Never leave speaker_candidates empty or omit it. Use ALL available evidence to determine who is speaking:
+
+1. EXPLICIT DIALOGUE TAGS: "said John", "Mary whispered", "he replied" — use the named character directly.
+2. PRONOUN RESOLUTION: If the tag says "he said" or "she asked", look at the surrounding narration to determine which character "he" or "she" refers to. Assign that character as the speaker.
+3. TURN-TAKING ORDER: In a conversation between two or more characters, speakers typically alternate. If Character A spoke last, the next quote is very likely Character B. Use this pattern.
+4. NARRATIVE CONTEXT: If narration describes a character's actions or thoughts immediately before a quote (e.g., "John stepped forward. \\"Let's go.\\""), that character is almost certainly the speaker.
+5. CONTENT AND TONE: What is said can indicate who is speaking — a character's known personality, role, or speech patterns can help identify them.
+6. SCENE CONTEXT: Consider who is present in the scene. If only two characters are in a room, all dialogue must be between them.
+7. BEST GUESS AT LOW CONFIDENCE: If you cannot determine the speaker with high confidence, you MUST still provide your best guess. A low-confidence identification (e.g., 0.4) is far better than no identification at all. Use "Unknown" only as an absolute last resort when there are zero contextual clues whatsoever.
+
+Examples of speaker inference:
+- "She turned to leave. \\"I'll be back,\\" she promised." → The speaker is whoever "she" refers to in context. Assign that character with high confidence.
+- After a line from John: "\\"That's ridiculous!\\"" (no dialogue tag) → Likely the other character in the conversation (turn-taking). Assign with moderate confidence (0.6-0.7).
+- "The doctor examined the chart. \\"We need to operate immediately.\\"" → The doctor is speaking (narrative context). Assign with high confidence.
 
 EMOTION: Assign exactly one emotion per segment from this FIXED list ONLY: ${VALID_EMOTIONS.join(", ")}
 
@@ -330,7 +342,7 @@ EXAMPLE — given: "She walked through the crowded marketplace, scanning the sta
 Correct output — 3 segments in 1 chunk, NOT 1 large segment:
 - Segment 1 (narration, 13w): "She walked through the crowded marketplace, scanning the stalls for anything useful."
 - Segment 2 (narration, 20w): "The smell of fresh bread drifted from a nearby bakery, mixing with the sharp tang of fish from the harbor."
-- Segment 3 (spoken, 8w): "\\"Looking for something specific?\\" the old merchant asked, leaning forward."
+- Segment 3 (spoken, 8w): "\\"Looking for something specific?\\" the old merchant asked, leaning forward." → speaker_candidates: {"the old merchant": 0.95}
 
 Return JSON in this exact format:
 {
@@ -361,7 +373,46 @@ Important:
 - Include ALL text with no gaps
 - Chunk IDs should be sequential starting from the provided starting ID
 - Use context from previous exchanges to identify speakers consistently
-- ONLY use emotions from the fixed list above — do not invent new emotion labels`;
+- ONLY use emotions from the fixed list above — do not invent new emotion labels
+- EVERY spoken segment MUST have a non-empty speaker_candidates object — never omit it`;
+
+let cachedResolvedPrompt: string | null = null;
+let cachedPromptTimestamp: number = 0;
+const PROMPT_CACHE_TTL_MS = 5000;
+
+export function invalidatePromptCache(): void {
+  cachedResolvedPrompt = null;
+  cachedPromptTimestamp = 0;
+}
+
+async function getSystemPrompt(): Promise<string> {
+  const now = Date.now();
+  if (cachedResolvedPrompt !== null && (now - cachedPromptTimestamp) < PROMPT_CACHE_TTL_MS) {
+    return cachedResolvedPrompt;
+  }
+
+  try {
+    const resp = await fetch(`http://localhost:${process.env.PYTHON_PORT || 8000}/parsing-prompt`);
+    if (resp.ok) {
+      const data = await resp.json() as { prompt: string; isCustom: boolean };
+      if (data.isCustom && data.prompt) {
+        const resolved = data.prompt.replace(/\$\{VALID_EMOTIONS\}/g, VALID_EMOTIONS.join(", "));
+        cachedResolvedPrompt = resolved;
+        cachedPromptTimestamp = now;
+        return resolved;
+      }
+    }
+  } catch {
+  }
+
+  cachedResolvedPrompt = DEFAULT_SYSTEM_PROMPT;
+  cachedPromptTimestamp = now;
+  return DEFAULT_SYSTEM_PROMPT;
+}
+
+export function getDefaultSystemPrompt(): string {
+  return DEFAULT_SYSTEM_PROMPT;
+}
 
 async function parseWithConversation(
   text: string,
@@ -369,8 +420,9 @@ async function parseWithConversation(
   knownSpeakers: string[]
 ): Promise<LLMParseResult> {
   const batches = splitIntoParagraphBatches(text, 3);
+  const systemPrompt = await getSystemPrompt();
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-    { role: "system", content: SYSTEM_PROMPT }
+    { role: "system", content: systemPrompt }
   ];
   
   if (knownSpeakers.length > 0) {
@@ -472,8 +524,9 @@ export async function* parseTextWithLLMStreaming(
   
   yield { type: 'progress', chunkIndex: 0, totalChunks: totalBatches };
   
+  const systemPrompt = await getSystemPrompt();
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-    { role: "system", content: SYSTEM_PROMPT }
+    { role: "system", content: systemPrompt }
   ];
   
   if (knownSpeakers.length > 0) {

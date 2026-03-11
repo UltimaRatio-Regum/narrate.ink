@@ -1,7 +1,7 @@
 # VoxLibris - Text to Audiobook Generator
 
 ## Overview
-VoxLibris is a web application designed to transform plain text into expressive audiobooks using advanced AI-powered text-to-speech (TTS) technologies. Its core purpose is to provide high-quality, customizable audiobook generation, incorporating features like multi-speaker assignment, sentiment-based prosody adjustments, and smart text chunking. The project aims to deliver a seamless user experience for converting various text formats, including EPUBs, into engaging audio content, leveraging both neural and local TTS engines for flexibility and performance.
+VoxLibris is a web application that transforms plain text into expressive audiobooks using advanced AI-powered text-to-speech (TTS) technologies. It provides high-quality, customizable audiobook generation with features like multi-speaker assignment, sentiment-based prosody adjustments, and smart text chunking. The project aims to offer a seamless user experience for converting various text formats, including EPUBs, into engaging audio content, utilizing both neural and local TTS engines.
 
 ## User Preferences
 - Modern, professional design with purple/violet theme
@@ -11,70 +11,34 @@ VoxLibris is a web application designed to transform plain text into expressive 
 ## System Architecture
 
 ### Frontend (React + TypeScript)
-- **Framework**: React with TypeScript
-- **Styling**: Tailwind CSS with custom design tokens
-- **State Management**: TanStack Query for server state
-- **Routing**: Wouter
-- **UI Components**: Shadcn/ui
-- **UI/UX Decisions**: Five-tab layout (Beginner, Advanced, Projects, Jobs, Settings), file upload workflow, wizard-style generation flow (Upload → Analyzing → Voice Selection → Generate), real-time progress updates, dark mode support.
-- **Projects Tab**: Full project management system. `ProjectsListPanel.tsx` shows project cards; `CreateProjectDialog.tsx` creates projects from text/EPUB. `ProjectEditor.tsx` is a two-panel layout: left tree (`ProjectTree.tsx`) + right detail panel (`ProjectDetailPanel.tsx`). Tree shows Book → Chapters → Sections → Chunks hierarchy. Detail panel adapts to selected node type with settings overrides and audio generation. `ProjectAudioList.tsx` handles playback of generated audio. Book-level settings include output format (single MP3, MP3 per chapter ZIP, M4B audiobook with chapters), audiobook metadata (author, narrator, genre, year, description), cover image upload, and export/download button. Export uses `mutagen` for ID3/MP4 tags and `ffmpeg` for M4B encoding. **Speaker Voices** section at book level shows all detected speakers with voice assignment dropdowns (stored in `speakersJson`). Clicking a speaker name opens the **Speaker Inspector Dialog** (`SpeakerInspectorDialog.tsx`) showing all chunks attributed to that speaker with surrounding context, plus a merge/reassign feature to combine speakers (handles typos, pronouns). Backend endpoint `POST /projects/{id}/speakers/merge` reassigns chunks based on effective speaker (override or detected).
-- **Advanced Tab Layout**: Two-column grid. Left: TextInput → TextPreview. Right: Generation Settings (engine, intensity, pause) → Voice Assignment (appears after text analysis, with narrator + detected speaker dropdowns, inline "Upload New Voice" option).
-- **Settings Tab**: Default TTS engine/voice selection (persisted to localStorage), Custom Voices management (upload/rename/delete/play), emotion prosody configuration table with pitch/speed/volume weights (persisted to prosody_settings.json), engine registration (REST DI), voice library browser.
-- **TTS Engine Configuration**: Centralized in `client/src/lib/tts-engines.ts` with `TTS_ENGINES` array defining built-in engines (Edge TTS, Soprano). Registered remote engines fetched from `/api/tts-engines` and merged into engine dropdowns in both Advanced and Beginner tabs. `RegisteredEngine` type exported from `SettingsPanel.tsx`. Helper functions: `isVoiceCloningEngine()`, `getTTSEngine()`, `getVoiceCloningEngines()`, `getLocalEngines()`.
+- **Framework**: React with TypeScript, styled with Tailwind CSS and Shadcn/ui components.
+- **State Management**: TanStack Query for server state; Wouter for routing.
+- **UI/UX Decisions**: Five-tab layout (Beginner, Advanced, Projects, Jobs, Settings); wizard-style generation flow (Upload → Analyzing → Voice Selection → Generate); real-time progress updates; dark mode support.
+- **Projects Tab**: Manages audiobook projects, supporting text/EPUB imports. Features a two-panel editor for hierarchical content (Book → Chapters → Sections → Chunks), allowing settings overrides and audio generation at various levels. Includes audiobook metadata editing, cover image upload, and export options (single MP3, MP3 per chapter ZIP, M4B with chapters). Speaker voice assignment and a "Speaker Inspector Dialog" for managing and merging speakers are integrated.
+- **Advanced Tab**: Provides text input, preview, generation settings (engine, intensity, pause), and voice assignment (narrator + detected speakers).
+- **Settings Tab**: Configures default TTS engine/voice, manages custom voices, sets emotion prosody weights, allows registration/management of external TTS engines, and provides an editable parsing/speaker-identification prompt for customizing LLM text analysis behavior.
+- **TTS Engine Configuration**: Centralized management of built-in (Edge TTS, Soprano) and remote TTS engines, supporting dynamic registration and integration into voice selection.
 
 ### Backend (Python + FastAPI)
-- **Framework**: FastAPI with uvicorn
-- **Built-in TTS Engines**:
-    - **edge-tts**: High-quality neural TTS (Microsoft Azure), 300+ voices.
-    - **Soprano TTS**: Ultra-fast local generation (80M model, 2000x real-time on GPU).
-- **Remote TTS Engines**: Registered via REST DI system (URL + optional API key). `RemoteTTSClient` in `backend/remote_tts_client.py` auto-normalizes HuggingFace Spaces page URLs to API endpoints. Includes automatic warm-up polling (`wake_up()`) with 5-minute timeout before job processing — tries `/health` first, falls back to `/GetEngineDetails` if unavailable. Supports cancellation during wake-up. Frontend shows amber "waking up" indicator in Jobs panel. Legacy backend engine classes (Chatterbox, HF TTS Paid, StyleTTS2, OpenAI, Piper) remain in `backend/tts_engines.py` but are not exposed in the frontend engine list.
-- **Base Voice / Language**: Optional `base_voices` list in `GetEngineDetails` response and `base_voice_id` parameter in `ConvertTextToSpeech` for engines that separate base speech generation from voice cloning (e.g., OpenVoice V2). When an engine provides `base_voices`, a "Base Voice / Language" dropdown appears in the Voice Assignment section. The selected base voice controls language/accent of generated speech independently from the cloned voice. Stored per-project as `base_voice_id`.
-- **TTS Architecture**: Base class pattern in `backend/tts_engines.py` with unified TTSParams (text, voice_wav, voice_text, voice_id, speed, pitch, emotion, exaggeration). Engine subclasses implement engine-specific logic. EngineFactory creates instances by name.
-- **Audio Processing**: pyrubberband for pitch/speed manipulation, pydub for format conversion, soundfile, numpy, scipy for audio I/O. Aggressive silence trimming for TTS audio (two-pass removal and edge trimming).
-- **Emotion Analysis**: 14 canonical emotions (neutral, happy, sad, angry, fear, disgust, surprise, excited, calm, anxious, hopeful, melancholy, tender, proud). LLM assigns per-chunk emotions in a single pass; TextBlob fallback uses keyword matching + polarity.
-- **Text Processing**: Unified segmentation+chunking in one LLM pass producing 8-12 second chunks with quote-boundary splitting, per-chunk emotion, and speaker identification. Non-LLM fallback: regex quote splitting → paragraph splitting → smart chunking (~10s target, priority: sentence endings, colons/semicolons, commas, conjunctions). Known speakers accumulated across chapters for long-form content. Project segmentation splits chapters into sections (~300 words, paragraph-boundary-aware with fallback to `\n` and sentence boundaries). Post-split enforces max 30 chunks per section. `ProjectSection` has a `title` column; LLM generates brief summary titles (5-8 words) via OpenRouter after segmentation. Tree displays "Sec N: {title}" or "Sec N".
-- **Job Management**: Asynchronous TTS generation jobs running in background threads, with database persistence (SQLAlchemy) for jobs and segments. Real-time progress tracking, partial playback of segments, and job lifecycle management (create, list, cancel, delete). **Per-section job splitting**: Generating a chapter or book creates one job per section (each ~30 chunks) with a shared `job_group_id`. **Recursive audio roll-up**: After a section job completes, chunk audio is concatenated into a section-level combined entry. When all section jobs for a chapter finish, section audio is concatenated into a chapter-level combined entry. Audio list shows combined entries at the appropriate level (section → section audio, chapter → chapter audio, book → chapter entries). `TTSJob.job_group_id` links related section jobs; `ProjectAudioFile.label` provides display names. Fallback: if combined audio doesn't exist yet, falls back to showing chunk-level entries.
-- **File Handling**: Support for `.txt` and `.epub` files with automatic chapter extraction (using `ebooklib`).
-- **API Endpoints**: Comprehensive RESTful API for managing voices, text parsing, generating audiobooks, and monitoring job status.
+- **Framework**: FastAPI with uvicorn.
+- **Built-in TTS Engines**: Integrates `edge-tts` (Microsoft Azure) and Soprano TTS for high-quality and ultra-fast local generation, respectively.
+- **Remote TTS Engines**: Supports a REST DI system for registering external TTS services, including automatic warm-up polling and cancellation during wake-up. Specific engine implementations (XTTSv2, Qwen2.5/3-TTS, OpenVoice V2, Chatterbox, StyleTTS2, IndexTTS2) are provided as deployable HuggingFace Space endpoints.
+- **Base Voice / Language**: Allows selection of a base voice for engines that separate base speech generation from voice cloning, controlling language/accent independently.
+- **TTS Architecture**: Uses a base class pattern for TTS engines, standardizing parameters (text, voice_wav, voice_text, voice_id, speed, pitch, emotion, exaggeration) and allowing engine-specific logic.
+- **Audio Processing**: Utilizes pyrubberband for pitch/speed, pydub for format conversion, and aggressive silence trimming.
+- **Emotion Analysis**: Assigns 14 canonical emotions per text chunk using an LLM, with TextBlob as a fallback.
+- **Text Processing**: Unified LLM-based segmentation and chunking (8-12 second chunks) with quote-boundary splitting, per-chunk emotion, and speaker identification. Includes non-LLM fallbacks and project-level segmentation into sections with LLM-generated titles. Speaker identification employs aggressive heuristics.
+- **Editable Parsing Prompt**: The LLM system prompt for text chunking and speaker identification is user-editable and persisted.
+- **Job Management**: Asynchronous TTS generation jobs run in background threads, with database persistence (SQLAlchemy) for jobs and segments. Supports real-time progress, partial playback, and job lifecycle management. Jobs are split per section for parallel processing, and audio is recursively rolled up from chunks to sections to chapters for combined playback.
+- **File Handling**: Supports `.txt` and `.epub` files with automatic chapter extraction.
+- **API Endpoints**: Comprehensive RESTful API for managing voices, text parsing, audio generation, and job status.
 
 ### Deployable Engine Endpoints (`engines/`)
-- **engines/xttsv2/**: HuggingFace Space (Docker SDK) serving Coqui XTTSv2 as a REST API implementing the VoxLibris TTS API Contract. Files: `app.py` (FastAPI), `Dockerfile`, `requirements.txt`, `README.md`. Supports voice cloning via base64 WAV, emotion prompting, speed/volume control, 16 languages. Deploy to HF Spaces, then register the URL in VoxLibris Settings.
-- **engines/qwen25-tts/**: HuggingFace Space (Docker SDK) serving Qwen2.5-Omni-7B as a REST API implementing the VoxLibris TTS API Contract. Files: `app.py` (FastAPI), `Dockerfile`, `requirements.txt`, `README.md`. Built-in voices (Chelsie, Ethan), voice cloning via audio conditioning, emotion prompting, pyrubberband speed/pitch adjustment, 16 languages. Requires GPU (A10G+). Deploy to HF Spaces, then register the URL in VoxLibris Settings.
-- **engines/qwen3-tts/**: HuggingFace Space (Docker SDK) serving Qwen3-TTS-12Hz-1.7B as a REST API implementing the VoxLibris TTS API Contract. Uses `qwen_tts` package with `Qwen3TTSModel`. Two models loaded: CustomVoice (9 built-in speakers with instruct-based emotion) and Base (voice cloning via x-vector). Files: `app.py` (FastAPI), `Dockerfile`, `requirements.txt`, `index.html`, `README.md`. 9 voices (Ryan, Aiden, Vivian, Serena, Uncle Fu, Dylan, Eric, Ono Anna, Sohee), pyrubberband speed/pitch. Requires GPU (L4+). Deploy to HF Spaces, then register the URL in VoxLibris Settings.
-- **engines/openvoice-v2/**: HuggingFace Space (Docker SDK) serving MyShell OpenVoice V2 as a REST API implementing the VoxLibris TTS API Contract. Two-stage architecture: MeloTTS for base speech generation + ToneColorConverter for instant voice cloning. Files: `app.py` (FastAPI), `Dockerfile`, `requirements.txt`, `index.html`, `README.md`. 10 built-in voices across 6 languages (EN, ES, FR, ZH, JP, KR), pyrubberband pitch adjustment, native speed control. Lightweight (~500 MB), runs on CPU or GPU. Deploy to HF Spaces, then register the URL in VoxLibris Settings.
-- **engines/chatterbox/**: HuggingFace Space (Docker SDK) serving Chatterbox TTS as a REST API implementing the VoxLibris TTS API Contract. Files: `app.py` (FastAPI), `Dockerfile`, `requirements.txt`, `index.html` (test console), `README.md`. Voice cloning only (requires reference audio). Full emotion-to-parameter mapping: emotion→exaggeration (0.0-1.0), emotion→cfg_weight, emotion→temperature, plus emotion→speed/pitch prosody reinforcement. 300 char limit per request, pyrubberband speed/pitch. Requires GPU (T4+). Deploy to HF Spaces, then register the URL in VoxLibris Settings.
-- **engines/styletts2/**: HuggingFace Space (Docker SDK) serving StyleTTS2 as a REST API implementing the VoxLibris TTS API Contract. Uses `styletts2` PyPI package (v0.1.6+) with LibriTTS multi-speaker model. Emotion control via diffusion parameter presets (alpha/beta/embedding_scale/diffusion_steps) for 9 emotions (neutral, happy, sad, angry, fear, excited, calm, surprised, whisper). Voice cloning via reference audio. Long-form inference with style continuity. Requires GPU (T4+). Python 3.10, pinned dependencies for compatibility. Deploy to HF Spaces, then register the URL in VoxLibris Settings.
-- **engines/indextts2/**: HuggingFace Space (Docker SDK) serving IndexTTS2 as a REST API implementing the VoxLibris TTS API Contract. Files: `app.py` (FastAPI), `Dockerfile`, `requirements.txt`, `index.html` (test console), `README.md`. Zero-shot voice cloning with emotion-speaker disentanglement. 8-dimensional emotion vectors (happy, angry, sad, afraid, disgusted, melancholic, surprised, calm) via fine-tuned Qwen3 model. VoxLibris's 14 canonical emotions mapped to blended vectors with intensity scaling. 500 char limit per request, pyrubberband speed/pitch. Model ~5 GB (IndexTeam/IndexTTS-2). Requires GPU (A10G+). Deploy to HF Spaces, then register the URL in VoxLibris Settings.
-
-## Docker Deployment
-
-The app can be run with Docker and Docker Compose. The setup includes:
-- **Dockerfile**: Multi-stage build (Node.js frontend build → Python deps → combined runtime). Produces a single image that runs both the Express server and the Python FastAPI backend.
-- **docker-compose.yml**: Orchestrates the app container and a PostgreSQL 16 database with a persistent volume.
-- **docker-entrypoint.sh**: Startup script that launches the Python backend, waits for it to be healthy, then starts the Node.js server.
-- **.env.example**: Template for environment variables (copy to `.env` and fill in).
-
-### Quick Start
-```bash
-cp .env.example .env        # Edit .env with your secrets
-docker compose up --build    # Build and start all services
-```
-
-The app will be available at `http://localhost:5000`. PostgreSQL runs internally on port 5432 (mapped to host via `DB_PORT`).
-
-### Environment Variables
-- `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`: Database credentials (defaults: `voxlibris`)
-- `SESSION_SECRET`: Express session secret (required for production)
-- `AI_INTEGRATIONS_OPENROUTER_BASE_URL`, `AI_INTEGRATIONS_OPENROUTER_API_KEY`: Optional, for LLM-powered speaker detection
-- `APP_PORT`: Host port for the app (default: 5000)
-- `DB_PORT`: Host port for PostgreSQL (default: 5432)
+- A collection of HuggingFace Space Docker SDK implementations for various TTS models (e.g., XTTSv2, Qwen2.5/3-TTS, OpenVoice V2, Chatterbox, StyleTTS2, IndexTTS2). These provide REST APIs adhering to the VoxLibris TTS API Contract, supporting voice cloning, emotion prompting, and other features, designed for external deployment and registration.
 
 ## External Dependencies
-- **Microsoft Azure Neural TTS**: (via `edge-tts`)
-- **Soprano TTS**: (ekwek/Soprano-1.1-80M)
-- **Chatterbox TTS**: HuggingFace Spaces (Gradio API for Free tier, custom API for Paid tier)
-- **OpenAI TTS API**
-- **Piper TTS CLI**
-- **OpenRouter**: For LLM-powered text parsing and speaker detection (e.g., ChatGPT 4o, Llama, Mistral, Qwen, DeepSeek).
-- **PostgreSQL**: For job persistence and database management.
-- **VTCK Corpus**: Pre-recorded voice samples for the voice library.
+- **Microsoft Azure Neural TTS**: Integrated via `edge-tts`.
+- **Soprano TTS**: Local TTS model.
+- **OpenRouter**: Used for LLM-powered text parsing and speaker detection.
+- **PostgreSQL**: Primary database for job persistence and data management.
+- **VTCK Corpus**: Provides pre-recorded voice samples for the voice library.

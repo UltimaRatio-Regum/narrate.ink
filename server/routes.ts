@@ -2,7 +2,7 @@ import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { createProxyMiddleware } from "http-proxy-middleware";
 import express from "express";
-import { parseTextWithLLM, parseTextWithLLMStreaming, getAvailableModels, isOpenRouterConfigured } from "./llm-service";
+import { parseTextWithLLM, parseTextWithLLMStreaming, getAvailableModels, isOpenRouterConfigured, getDefaultSystemPrompt, invalidatePromptCache } from "./llm-service";
 
 const PYTHON_BACKEND_URL = process.env.PYTHON_BACKEND_URL || "http://127.0.0.1:8000";
 
@@ -229,6 +229,36 @@ export async function registerRoutes(
       res.json({ models, configured });
     } catch (error) {
       res.status(500).json({ error: 'Failed to fetch models' });
+    }
+  });
+
+  app.get('/api/parsing-prompt/default', (_req: Request, res: Response) => {
+    res.json({ prompt: getDefaultSystemPrompt() });
+  });
+
+  app.post('/api/parsing-prompt', express.json(), async (req: Request, res: Response) => {
+    try {
+      const resp = await fetch(`${PYTHON_BACKEND_URL}/parsing-prompt`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(req.body),
+      });
+      const data = await resp.json();
+      invalidatePromptCache();
+      res.json(data);
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to save parsing prompt' });
+    }
+  });
+
+  app.delete('/api/parsing-prompt', async (_req: Request, res: Response) => {
+    try {
+      const resp = await fetch(`${PYTHON_BACKEND_URL}/parsing-prompt`, { method: 'DELETE' });
+      const data = await resp.json();
+      invalidatePromptCache();
+      res.json(data);
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to reset parsing prompt' });
     }
   });
 

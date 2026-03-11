@@ -1730,6 +1730,53 @@ async def update_prosody_settings(request: ProsodySettingsRequest):
     }
 
 
+PARSING_PROMPT_FILE = Path("parsing_prompt_settings.json")
+
+
+@app.get("/parsing-prompt")
+async def get_parsing_prompt():
+    """Get the current custom parsing/speaker-identification prompt, or indicate default is in use."""
+    if PARSING_PROMPT_FILE.exists():
+        try:
+            with open(PARSING_PROMPT_FILE, "r") as f:
+                data = json.load(f)
+            if data.get("prompt"):
+                return {"prompt": data["prompt"], "isCustom": True}
+        except Exception as e:
+            logger.warning(f"Failed to load parsing prompt: {e}")
+    return {"prompt": "", "isCustom": False}
+
+
+class ParsingPromptRequest(BaseModel):
+    prompt: str
+
+
+@app.post("/parsing-prompt")
+async def update_parsing_prompt(request: ParsingPromptRequest):
+    """Save a custom parsing/speaker-identification prompt."""
+    try:
+        with open(PARSING_PROMPT_FILE, "w") as f:
+            json.dump({"prompt": request.prompt}, f, indent=2)
+        logger.info("Saved custom parsing prompt to file")
+        return {"success": True, "isCustom": bool(request.prompt)}
+    except Exception as e:
+        logger.error(f"Failed to save parsing prompt: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/parsing-prompt")
+async def reset_parsing_prompt():
+    """Reset to the default parsing prompt by removing the custom file."""
+    try:
+        if PARSING_PROMPT_FILE.exists():
+            PARSING_PROMPT_FILE.unlink()
+        logger.info("Reset parsing prompt to default")
+        return {"success": True, "isCustom": False}
+    except Exception as e:
+        logger.error(f"Failed to reset parsing prompt: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 TTS_SETTINGS_FILE = Path(__file__).parent.parent / "tts_settings.json"
 
 def load_tts_settings():
