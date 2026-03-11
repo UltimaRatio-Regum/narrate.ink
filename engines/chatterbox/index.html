@@ -281,6 +281,12 @@
       </div>
     </div>
 
+    <div class="card">
+      <div class="card-title">Authentication</div>
+      <label for="apiKey">API Key (if set on server)</label>
+      <input type="text" id="apiKey" placeholder="Leave empty if no auth required">
+    </div>
+
     <button class="generate" id="generateBtn" onclick="generate()">Generate Speech</button>
 
     <div class="result-area hidden" id="resultArea">
@@ -399,9 +405,12 @@
       };
 
       try {
+        const hdrs = { "Content-Type": "application/json" };
+        const apiKey = document.getElementById("apiKey").value.trim();
+        if (apiKey) hdrs["Authorization"] = "Bearer " + apiKey;
         const resp = await fetch("/ConvertTextToSpeech", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: hdrs,
           body: JSON.stringify(payload),
         });
 
