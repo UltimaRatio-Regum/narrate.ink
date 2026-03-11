@@ -1888,6 +1888,7 @@ def _serialize_project_full(project: Project, db) -> dict:
                 "id": sec.id,
                 "chapterId": sec.chapter_id,
                 "sectionIndex": sec.section_index,
+                "title": sec.title,
                 "status": sec.status,
                 "errorMessage": sec.error_message,
                 "chunks": chunks_data,
@@ -2243,7 +2244,7 @@ async def segment_project(project_id: str):
     finally:
         db.close()
 
-    segment_project_background(project_id)
+    segment_project_background(project_id, use_llm=True)
     return {"success": True, "message": "Segmentation started"}
 
 

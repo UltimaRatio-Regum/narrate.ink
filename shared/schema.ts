@@ -255,6 +255,7 @@ export const projectSectionSchema = z.object({
   id: z.string(),
   chapterId: z.string(),
   sectionIndex: z.number(),
+  title: z.string().nullable().optional(),
   status: z.string(),
   errorMessage: z.string().nullable(),
   chunks: z.array(projectChunkSchema).optional(),

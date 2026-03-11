@@ -238,6 +238,7 @@ class ProjectSection(Base):
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     chapter_id = Column(String, ForeignKey("project_chapters.id", ondelete="CASCADE"), nullable=False)
     section_index = Column(Integer, nullable=False)
+    title = Column(String, nullable=True)
     status = Column(String, nullable=False, default="pending")
     error_message = Column(Text, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)

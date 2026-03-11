@@ -172,7 +172,7 @@ export function ProjectTree({ project, selection, onSelect }: ProjectTreeProps) 
                     <div key={section.id}>
                       <TreeNode
                         icon={FileText}
-                        label={`Section ${section.sectionIndex + 1}`}
+                        label={section.title ? `Sec ${section.sectionIndex + 1}: ${section.title}` : `Sec ${section.sectionIndex + 1}`}
                         sublabel={`${chunks.length} chunks`}
                         status={section.status}
                         isSelected={selection?.type === "section" && selection.id === section.id}
