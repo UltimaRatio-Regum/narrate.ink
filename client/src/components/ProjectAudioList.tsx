@@ -1,11 +1,21 @@
 import { useState, useRef } from "react";
-import { Play, Pause, Volume2, Clock, Cpu } from "lucide-react";
+import { Play, Pause, Volume2, Clock, Cpu, FileAudio } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { ProjectAudioFile } from "@shared/schema";
 
 interface ProjectAudioListProps {
   audioFiles: ProjectAudioFile[];
   projectId: string;
+}
+
+function formatDuration(seconds: number): string {
+  if (seconds < 60) return `${seconds.toFixed(1)}s`;
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.round(seconds % 60);
+  if (mins < 60) return `${mins}m ${secs}s`;
+  const hrs = Math.floor(mins / 60);
+  const remainMins = mins % 60;
+  return `${hrs}h ${remainMins}m`;
 }
 
 function AudioFileEntry({ audio, projectId }: { audio: ProjectAudioFile; projectId: string }) {
@@ -23,6 +33,7 @@ function AudioFileEntry({ audio, projectId }: { audio: ProjectAudioFile; project
   };
 
   const audioUrl = `/api/projects/${projectId}/audio/${audio.id}`;
+  const isCombined = audio.scopeType !== "chunk";
 
   return (
     <div className="flex items-center gap-3 p-3 rounded-lg border bg-card" data-testid={`audio-entry-${audio.id}`}>
@@ -45,11 +56,17 @@ function AudioFileEntry({ audio, projectId }: { audio: ProjectAudioFile; project
       />
 
       <div className="flex-1 min-w-0 space-y-1">
+        {audio.label && (
+          <div className="flex items-center gap-1.5 text-sm font-medium truncate" data-testid={`text-audio-label-${audio.id}`}>
+            {isCombined && <FileAudio className="h-3.5 w-3.5 text-primary shrink-0" />}
+            <span className="truncate">{audio.label}</span>
+          </div>
+        )}
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           {audio.durationSeconds && (
             <span className="flex items-center gap-1">
               <Clock className="h-3 w-3" />
-              {audio.durationSeconds.toFixed(1)}s
+              {formatDuration(audio.durationSeconds)}
             </span>
           )}
           {audio.ttsEngine && (
@@ -58,7 +75,7 @@ function AudioFileEntry({ audio, projectId }: { audio: ProjectAudioFile; project
               {audio.ttsEngine}
             </span>
           )}
-          {audio.voiceId && (
+          {!isCombined && audio.voiceId && (
             <span className="truncate">{audio.voiceId}</span>
           )}
         </div>

@@ -209,6 +209,7 @@ export const ttsJobSchema = z.object({
   ttsEngine: z.string(),
   narratorVoiceId: z.string().nullable(),
   errorMessage: z.string().nullable(),
+  jobGroupId: z.string().nullable().optional(),
   createdAt: z.string().nullable(),
   updatedAt: z.string().nullable(),
   progress: z.number(),
@@ -287,6 +288,7 @@ export const projectAudioFileSchema = z.object({
   ttsEngine: z.string().nullable(),
   voiceId: z.string().nullable(),
   settingsJson: z.string().nullable(),
+  label: z.string().nullable().optional(),
   createdAt: z.string().nullable(),
 });
 export type ProjectAudioFile = z.infer<typeof projectAudioFileSchema>;

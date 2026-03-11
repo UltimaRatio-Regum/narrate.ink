@@ -1922,6 +1922,7 @@ def _serialize_project_full(project: Project, db) -> dict:
         "ttsEngine": af.tts_engine,
         "voiceId": af.voice_id,
         "settingsJson": af.settings_json,
+        "label": af.label,
         "createdAt": af.created_at.isoformat() if af.created_at else None,
     } for af in audio_files]
 
@@ -2307,6 +2308,28 @@ async def segment_project(project_id: str):
     return {"success": True, "message": "Segmentation started"}
 
 
+def _build_segment_data(chunk, chapter, tts_engine, narrator_voice_id, speakers):
+    """Build a segment dict from a chunk for job creation."""
+    ch_engine = chapter.tts_engine or tts_engine
+    ch_narrator = chapter.narrator_voice_id or narrator_voice_id
+    speaker = chunk.speaker_override or chunk.speaker
+    emotion = chunk.emotion_override or chunk.emotion
+    voice_id = ch_narrator
+    if speaker and speaker in speakers:
+        sp_config = speakers[speaker]
+        if isinstance(sp_config, dict) and sp_config.get("voiceSampleId"):
+            voice_id = sp_config["voiceSampleId"]
+    return {
+        "id": chunk.id,
+        "text": chunk.text,
+        "type": chunk.segment_type,
+        "speaker": speaker,
+        "sentiment": {"label": emotion} if emotion else None,
+        "voice_id": voice_id,
+        "tts_engine": ch_engine,
+    }
+
+
 @app.post("/projects/{project_id}/generate")
 async def generate_project_audio(project_id: str, request: GenerateProjectAudioRequest):
     db = get_db_session()
@@ -2315,7 +2338,15 @@ async def generate_project_audio(project_id: str, request: GenerateProjectAudioR
         if not project:
             raise HTTPException(status_code=404, detail="Project not found")
 
-        chunks_to_generate = []
+        tts_engine = project.tts_engine
+        narrator_voice_id = project.narrator_voice_id
+        base_voice_id = project.base_voice_id
+        speakers = json.loads(project.speakers_json) if project.speakers_json else {}
+        exaggeration = project.exaggeration
+        pause_duration = project.pause_duration
+
+        from job_manager import create_job
+        from job_runner import start_job_async
 
         if request.scopeType == "chunk":
             chunk = db.query(ProjectChunk).join(ProjectSection).join(ProjectChapter).filter(
@@ -2326,7 +2357,25 @@ async def generate_project_audio(project_id: str, request: GenerateProjectAudioR
                 raise HTTPException(status_code=404, detail="Chunk not found")
             section = db.query(ProjectSection).filter(ProjectSection.id == chunk.section_id).first()
             chapter = db.query(ProjectChapter).filter(ProjectChapter.id == section.chapter_id).first()
-            chunks_to_generate.append((chunk, chapter))
+            seg = _build_segment_data(chunk, chapter, tts_engine, narrator_voice_id, speakers)
+            job_id = create_job(
+                title=f"{project.title} — Chunk",
+                segments=[seg],
+                config={
+                    "defaultExaggeration": exaggeration,
+                    "pauseBetweenSegments": pause_duration,
+                    "speakers": speakers,
+                    "ttsEngine": tts_engine,
+                    "narratorVoiceId": narrator_voice_id,
+                    "baseVoiceId": base_voice_id,
+                    "projectId": project_id,
+                    "scopeType": "chunk",
+                    "scopeId": request.scopeId,
+                    "chunkIds": [chunk.id],
+                }
+            )
+            start_job_async(job_id)
+            return {"success": True, "jobId": job_id, "totalSegments": 1}
 
         elif request.scopeType == "section":
             section = db.query(ProjectSection).join(ProjectChapter).filter(
@@ -2339,92 +2388,123 @@ async def generate_project_audio(project_id: str, request: GenerateProjectAudioR
             chunks = db.query(ProjectChunk).filter(
                 ProjectChunk.section_id == section.id
             ).order_by(ProjectChunk.chunk_index).all()
-            chunks_to_generate = [(c, chapter) for c in chunks]
+            if not chunks:
+                raise HTTPException(status_code=400, detail="No chunks in section")
+            segments = [_build_segment_data(c, chapter, tts_engine, narrator_voice_id, speakers) for c in chunks]
+            section_label = section.title or f"Section {section.section_index + 1}"
+            chapter_title = chapter.title or f"Chapter {chapter.chapter_index + 1}"
+            job_id = create_job(
+                title=f"{project.title} — {chapter_title} — {section_label}",
+                segments=segments,
+                config={
+                    "defaultExaggeration": exaggeration,
+                    "pauseBetweenSegments": pause_duration,
+                    "speakers": speakers,
+                    "ttsEngine": tts_engine,
+                    "narratorVoiceId": narrator_voice_id,
+                    "baseVoiceId": base_voice_id,
+                    "projectId": project_id,
+                    "scopeType": "section",
+                    "scopeId": section.id,
+                    "sectionId": section.id,
+                    "chapterId": chapter.id,
+                    "sectionLabel": section_label,
+                    "chapterTitle": chapter_title,
+                    "chunkIds": [c.id for c in chunks],
+                }
+            )
+            start_job_async(job_id)
+            return {"success": True, "jobId": job_id, "totalSegments": len(segments)}
 
-        elif request.scopeType == "chapter":
-            chapter = db.query(ProjectChapter).filter(
-                ProjectChapter.id == request.scopeId,
-                ProjectChapter.project_id == project_id
-            ).first()
-            if not chapter:
-                raise HTTPException(status_code=404, detail="Chapter not found")
-            chunks = db.query(ProjectChunk).join(ProjectSection).filter(
-                ProjectSection.chapter_id == chapter.id
-            ).order_by(ProjectChunk.chunk_index).all()
-            chunks_to_generate = [(c, chapter) for c in chunks]
+        elif request.scopeType in ("chapter", "project"):
+            sections_to_process = []
 
-        elif request.scopeType == "project":
-            chapters = db.query(ProjectChapter).filter(
-                ProjectChapter.project_id == project_id
-            ).order_by(ProjectChapter.chapter_index).all()
-            for chapter in chapters:
-                chunks = db.query(ProjectChunk).join(ProjectSection).filter(
+            if request.scopeType == "chapter":
+                chapter = db.query(ProjectChapter).filter(
+                    ProjectChapter.id == request.scopeId,
+                    ProjectChapter.project_id == project_id
+                ).first()
+                if not chapter:
+                    raise HTTPException(status_code=404, detail="Chapter not found")
+                sections = db.query(ProjectSection).filter(
                     ProjectSection.chapter_id == chapter.id
-                ).order_by(ProjectChunk.chunk_index).all()
-                chunks_to_generate.extend([(c, chapter) for c in chunks])
+                ).order_by(ProjectSection.section_index).all()
+                for sec in sections:
+                    chunks = db.query(ProjectChunk).filter(
+                        ProjectChunk.section_id == sec.id
+                    ).order_by(ProjectChunk.chunk_index).all()
+                    if chunks:
+                        sections_to_process.append((sec, chapter, chunks))
+
+            else:
+                chapters = db.query(ProjectChapter).filter(
+                    ProjectChapter.project_id == project_id
+                ).order_by(ProjectChapter.chapter_index).all()
+                for chapter in chapters:
+                    sections = db.query(ProjectSection).filter(
+                        ProjectSection.chapter_id == chapter.id
+                    ).order_by(ProjectSection.section_index).all()
+                    for sec in sections:
+                        chunks = db.query(ProjectChunk).filter(
+                            ProjectChunk.section_id == sec.id
+                        ).order_by(ProjectChunk.chunk_index).all()
+                        if chunks:
+                            sections_to_process.append((sec, chapter, chunks))
+
+            if not sections_to_process:
+                raise HTTPException(status_code=400, detail="No chunks found for the given scope")
+
+            job_group_id = str(uuid.uuid4())
+            job_ids = []
+            total_segments = 0
+
+            chapter_ids_in_group = list(set(ch.id for _, ch, _ in sections_to_process))
+
+            for sec, chap, chunks in sections_to_process:
+                segments = [_build_segment_data(c, chap, tts_engine, narrator_voice_id, speakers) for c in chunks]
+                section_label = sec.title or f"Section {sec.section_index + 1}"
+                chapter_title = chap.title or f"Chapter {chap.chapter_index + 1}"
+                job_id = create_job(
+                    title=f"{project.title} — {chapter_title} — {section_label}",
+                    segments=segments,
+                    config={
+                        "defaultExaggeration": exaggeration,
+                        "pauseBetweenSegments": pause_duration,
+                        "speakers": speakers,
+                        "ttsEngine": tts_engine,
+                        "narratorVoiceId": narrator_voice_id,
+                        "baseVoiceId": base_voice_id,
+                        "projectId": project_id,
+                        "scopeType": "section",
+                        "scopeId": sec.id,
+                        "sectionId": sec.id,
+                        "chapterId": chap.id,
+                        "sectionLabel": section_label,
+                        "chapterTitle": chapter_title,
+                        "chunkIds": [c.id for c in chunks],
+                        "jobGroupId": job_group_id,
+                        "groupScopeType": request.scopeType,
+                        "groupScopeId": request.scopeId,
+                        "chapterIdsInGroup": chapter_ids_in_group,
+                    },
+                    job_group_id=job_group_id,
+                )
+                job_ids.append(job_id)
+                total_segments += len(segments)
+
+            for jid in job_ids:
+                start_job_async(jid)
+
+            return {
+                "success": True,
+                "jobGroupId": job_group_id,
+                "jobIds": job_ids,
+                "totalJobs": len(job_ids),
+                "totalSegments": total_segments,
+            }
+
         else:
             raise HTTPException(status_code=400, detail="Invalid scope type")
-
-        if not chunks_to_generate:
-            raise HTTPException(status_code=400, detail="No chunks found for the given scope")
-
-        tts_engine = project.tts_engine
-        narrator_voice_id = project.narrator_voice_id
-        base_voice_id = project.base_voice_id
-        speakers = json.loads(project.speakers_json) if project.speakers_json else {}
-        exaggeration = project.exaggeration
-        pause_duration = project.pause_duration
-
-        segments_for_job = []
-        for chunk, chapter in chunks_to_generate:
-            ch_engine = chapter.tts_engine or tts_engine
-            ch_narrator = chapter.narrator_voice_id or narrator_voice_id
-
-            speaker = chunk.speaker_override or chunk.speaker
-            emotion = chunk.emotion_override or chunk.emotion
-
-            voice_id = ch_narrator
-            if speaker and speaker in speakers:
-                sp_config = speakers[speaker]
-                if isinstance(sp_config, dict) and sp_config.get("voiceSampleId"):
-                    voice_id = sp_config["voiceSampleId"]
-
-            segments_for_job.append({
-                "id": chunk.id,
-                "text": chunk.text,
-                "type": chunk.segment_type,
-                "speaker": speaker,
-                "sentiment": {"label": emotion} if emotion else None,
-                "voice_id": voice_id,
-                "tts_engine": ch_engine,
-            })
-
-        from job_manager import create_job
-        from job_runner import start_job_async
-
-        chunk_ids_ordered = [seg["id"] for seg in segments_for_job]
-
-        job_title = f"{project.title} - {request.scopeType}: {request.scopeId[:8]}"
-        job_id = create_job(
-            title=job_title,
-            segments=segments_for_job,
-            config={
-                "defaultExaggeration": exaggeration,
-                "pauseBetweenSegments": pause_duration,
-                "speakers": speakers,
-                "ttsEngine": tts_engine,
-                "narratorVoiceId": narrator_voice_id,
-                "baseVoiceId": base_voice_id,
-                "projectId": project_id,
-                "scopeType": request.scopeType,
-                "scopeId": request.scopeId,
-                "chunkIds": chunk_ids_ordered,
-            }
-        )
-
-        start_job_async(job_id)
-
-        return {"success": True, "jobId": job_id, "totalSegments": len(segments_for_job)}
 
     except HTTPException:
         raise
@@ -2453,6 +2533,7 @@ async def list_project_audio(project_id: str):
             "ttsEngine": af.tts_engine,
             "voiceId": af.voice_id,
             "settingsJson": af.settings_json,
+            "label": af.label,
             "createdAt": af.created_at.isoformat() if af.created_at else None,
         } for af in audio_files]
     finally:

@@ -71,22 +71,54 @@ export function ProjectDetailPanel({ selection, project, onRefresh }: ProjectDet
     ...libraryVoices.map((v) => ({ id: `library:${v.id}`, label: v.name })),
   ];
 
-  const audioFiles = (project.audioFiles || []).filter((af) => {
-    if (af.scopeType === selection.type && af.scopeId === selection.id) return true;
-    if (selection.type === "project") return true;
-    if (selection.type === "chunk" && af.scopeType === "chunk" && af.scopeId === selection.id) return true;
-    if (selection.type === "section") {
-      const section = selection.data as ProjectSection;
-      const chunkIds = (section.chunks || []).map(c => c.id);
-      return af.scopeType === "chunk" && chunkIds.includes(af.scopeId);
+  const audioFiles = useMemo(() => {
+    const allAudio = project.audioFiles || [];
+    let filtered: typeof allAudio;
+
+    if (selection.type === "chunk") {
+      filtered = allAudio.filter(af => af.scopeType === "chunk" && af.scopeId === selection.id);
+    } else if (selection.type === "section") {
+      filtered = allAudio.filter(af => af.scopeType === "section" && af.scopeId === selection.id);
+      if (filtered.length === 0) {
+        const section = selection.data as ProjectSection;
+        const chunkIds = (section.chunks || []).map(c => c.id);
+        filtered = allAudio.filter(af => af.scopeType === "chunk" && chunkIds.includes(af.scopeId));
+      }
+    } else if (selection.type === "chapter") {
+      filtered = allAudio.filter(af => af.scopeType === "chapter" && af.scopeId === selection.id);
+      if (filtered.length === 0) {
+        const chapter = selection.data as ProjectChapter;
+        const sectionIds = (chapter.sections || []).map(s => s.id);
+        filtered = allAudio.filter(af => af.scopeType === "section" && sectionIds.includes(af.scopeId));
+        const sectionOrder = new Map(sectionIds.map((id, idx) => [id, idx]));
+        filtered.sort((a, b) => (sectionOrder.get(a.scopeId) ?? 0) - (sectionOrder.get(b.scopeId) ?? 0));
+      }
+    } else if (selection.type === "project") {
+      const chapters = project.chapters || [];
+      const chapterIds = chapters.map(c => c.id);
+      filtered = allAudio.filter(af => af.scopeType === "chapter" && chapterIds.includes(af.scopeId));
+      const chapterOrder = new Map(chapterIds.map((id, idx) => [id, idx]));
+      if (filtered.length === 0) {
+        const sectionIdToChapterIdx = new Map<string, number>();
+        let sectionOrder = 0;
+        const sectionSortKey = new Map<string, number>();
+        for (const ch of chapters) {
+          const chIdx = chapterOrder.get(ch.id) ?? 0;
+          for (const sec of (ch.sections || [])) {
+            sectionIdToChapterIdx.set(sec.id, chIdx);
+            sectionSortKey.set(sec.id, sectionOrder++);
+          }
+        }
+        filtered = allAudio.filter(af => af.scopeType === "section" && sectionIdToChapterIdx.has(af.scopeId));
+        filtered.sort((a, b) => (sectionSortKey.get(a.scopeId) ?? 0) - (sectionSortKey.get(b.scopeId) ?? 0));
+      } else {
+        filtered.sort((a, b) => (chapterOrder.get(a.scopeId) ?? 0) - (chapterOrder.get(b.scopeId) ?? 0));
+      }
+    } else {
+      filtered = [];
     }
-    if (selection.type === "chapter") {
-      const chapter = selection.data as ProjectChapter;
-      const chunkIds = (chapter.sections || []).flatMap(s => (s.chunks || []).map(c => c.id));
-      return af.scopeType === "chunk" && chunkIds.includes(af.scopeId);
-    }
-    return false;
-  });
+    return filtered;
+  }, [project.audioFiles, selection]);
 
   const generateMutation = useMutation({
     mutationFn: async () => {
@@ -98,10 +130,11 @@ export function ProjectDetailPanel({ selection, project, onRefresh }: ProjectDet
       return res.json();
     },
     onSuccess: (data) => {
-      toast({
-        title: "Generation started",
-        description: `Job created with ${data.totalSegments} segments. Check the Jobs tab for progress.`,
-      });
+      const jobCount = data.totalJobs || 1;
+      const desc = jobCount > 1
+        ? `${jobCount} section jobs created with ${data.totalSegments} total segments. Check the Jobs tab for progress.`
+        : `Job created with ${data.totalSegments} segments. Check the Jobs tab for progress.`;
+      toast({ title: "Generation started", description: desc });
       onRefresh();
     },
     onError: (error: Error) => {

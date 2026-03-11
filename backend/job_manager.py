@@ -30,6 +30,7 @@ def create_job(
     title: str,
     segments: List[Dict[str, Any]],
     config: Dict[str, Any],
+    job_group_id: str = None,
 ) -> str:
     """Create a new TTS job in the database."""
     db = get_db_session()
@@ -46,6 +47,7 @@ def create_job(
             tts_engine=config.get("ttsEngine", "edge-tts"),
             narrator_voice_id=config.get("narratorVoiceId"),
             config_json=json.dumps(config),
+            job_group_id=job_group_id,
         )
         db.add(job)
         
@@ -91,6 +93,7 @@ def get_job(job_id: str) -> Optional[Dict[str, Any]]:
             "ttsEngine": job.tts_engine,
             "narratorVoiceId": job.narrator_voice_id,
             "errorMessage": job.error_message,
+            "jobGroupId": job.job_group_id,
             "createdAt": job.created_at.isoformat() if job.created_at else None,
             "updatedAt": job.updated_at.isoformat() if job.updated_at else None,
             "progress": (job.completed_segments / job.total_segments * 100) if job.total_segments > 0 else 0,
@@ -122,6 +125,7 @@ def get_all_jobs(include_completed: bool = True, limit: int = 50) -> List[Dict[s
                 "ttsEngine": job.tts_engine,
                 "narratorVoiceId": job.narrator_voice_id,
                 "errorMessage": job.error_message,
+                "jobGroupId": job.job_group_id,
                 "createdAt": job.created_at.isoformat() if job.created_at else None,
                 "updatedAt": job.updated_at.isoformat() if job.updated_at else None,
                 "progress": (job.completed_segments / job.total_segments * 100) if job.total_segments > 0 else 0,

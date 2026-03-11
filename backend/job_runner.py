@@ -182,7 +182,11 @@ async def process_job(job_id: str):
 
 
 def _persist_project_audio(job_id: str, config: Dict[str, Any], tts_engine: str, narrator_voice_id: str):
-    """After a job completes, persist completed segment audio to ProjectAudioFile if this was a project job."""
+    """After a job completes, persist completed segment audio to ProjectAudioFile.
+    
+    For section-scoped jobs: persists chunk audio + creates a combined section-level entry.
+    Then checks if all sibling section jobs in a group are complete to create chapter-level entries.
+    """
     project_id = config.get("projectId")
     if not project_id:
         return
@@ -191,7 +195,7 @@ def _persist_project_audio(job_id: str, config: Dict[str, Any], tts_engine: str,
     scope_id = config.get("scopeId", "")
     
     try:
-        import uuid
+        import uuid as uuid_mod
         from datetime import datetime
         
         db = get_db_session()
@@ -217,7 +221,7 @@ def _persist_project_audio(job_id: str, config: Dict[str, Any], tts_engine: str,
                     chunk_scope_id = seg.id
                 
                 af = ProjectAudioFile(
-                    id=str(uuid.uuid4()),
+                    id=str(uuid_mod.uuid4()),
                     project_id=project_id,
                     scope_type="chunk",
                     scope_id=chunk_scope_id,
@@ -238,14 +242,220 @@ def _persist_project_audio(job_id: str, config: Dict[str, Any], tts_engine: str,
                 db.add(af)
             
             db.commit()
-            logger.info(f"Persisted {len(segments)} audio files for project {project_id}")
+            logger.info(f"Persisted {len(segments)} chunk audio files for project {project_id}")
+            
+            if scope_type == "section":
+                _create_section_combined_audio(db, job_id, config, project_id, tts_engine, narrator_voice_id)
+                
+                job_group_id = config.get("jobGroupId")
+                if job_group_id:
+                    _check_and_create_chapter_audio(db, job_group_id, config, project_id, tts_engine, narrator_voice_id)
+            
         except Exception as e:
             db.rollback()
             logger.error(f"Failed to persist project audio: {e}")
+            import traceback
+            traceback.print_exc()
         finally:
             db.close()
     except Exception as e:
         logger.error(f"Error in _persist_project_audio: {e}")
+
+
+def _get_latest_chunk_audio(db, project_id: str, chunk_ids: list) -> dict:
+    """Get the latest audio blob for each chunk, keyed by chunk ID."""
+    from sqlalchemy import func
+    
+    subq = db.query(
+        ProjectAudioFile.scope_id,
+        func.max(ProjectAudioFile.created_at).label("max_created")
+    ).filter(
+        ProjectAudioFile.project_id == project_id,
+        ProjectAudioFile.scope_type == "chunk",
+        ProjectAudioFile.scope_id.in_(chunk_ids),
+    ).group_by(ProjectAudioFile.scope_id).subquery()
+    
+    latest = db.query(ProjectAudioFile).join(
+        subq,
+        (ProjectAudioFile.scope_id == subq.c.scope_id) &
+        (ProjectAudioFile.created_at == subq.c.max_created)
+    ).filter(
+        ProjectAudioFile.project_id == project_id,
+        ProjectAudioFile.scope_type == "chunk",
+    ).all()
+    
+    return {af.scope_id: af for af in latest}
+
+
+def _create_section_combined_audio(db, job_id: str, config: Dict[str, Any], project_id: str, tts_engine: str, narrator_voice_id: str):
+    """Concatenate chunk audio into a single section-level ProjectAudioFile."""
+    import uuid as uuid_mod
+    from datetime import datetime
+    
+    section_id = config.get("sectionId") or config.get("scopeId", "")
+    section_label = config.get("sectionLabel", "Section")
+    chapter_title = config.get("chapterTitle", "")
+    pause_ms = config.get("pauseBetweenSegments", 500)
+    
+    chunk_ids = config.get("chunkIds", [])
+    if not chunk_ids:
+        return
+    
+    chunk_audio_map = _get_latest_chunk_audio(db, project_id, chunk_ids)
+    ordered_blobs = []
+    for cid in chunk_ids:
+        if cid in chunk_audio_map and chunk_audio_map[cid].audio_data:
+            ordered_blobs.append(chunk_audio_map[cid].audio_data)
+    
+    if not ordered_blobs:
+        logger.warning(f"No chunk audio found for section {section_id}")
+        return
+    
+    combined_mp3 = _concatenate_mp3_blobs(ordered_blobs, pause_ms)
+    duration = _get_mp3_duration(combined_mp3)
+    
+    label = f"{chapter_title} — {section_label}" if chapter_title else section_label
+    
+    existing = db.query(ProjectAudioFile).filter(
+        ProjectAudioFile.project_id == project_id,
+        ProjectAudioFile.scope_type == "section",
+        ProjectAudioFile.scope_id == section_id,
+    ).with_for_update().first()
+    if existing:
+        existing.audio_data = combined_mp3
+        existing.duration_seconds = duration
+        existing.tts_engine = tts_engine
+        existing.voice_id = narrator_voice_id
+        existing.label = label
+        existing.created_at = datetime.utcnow()
+    else:
+        af = ProjectAudioFile(
+            id=str(uuid_mod.uuid4()),
+            project_id=project_id,
+            scope_type="section",
+            scope_id=section_id,
+            audio_data=combined_mp3,
+            format="mp3",
+            duration_seconds=duration,
+            tts_engine=tts_engine,
+            voice_id=narrator_voice_id,
+            label=label,
+            settings_json=json.dumps({"ttsEngine": tts_engine, "narratorVoiceId": narrator_voice_id}),
+            created_at=datetime.utcnow(),
+        )
+        db.add(af)
+    
+    db.commit()
+    logger.info(f"Created section-level combined audio for section {section_id} ({label})")
+
+
+def _check_and_create_chapter_audio(db, job_group_id: str, config: Dict[str, Any], project_id: str, tts_engine: str, narrator_voice_id: str):
+    """Check if all section jobs for this chapter are done, then create chapter-level combined audio.
+    
+    Uses per-chapter completion checking: only creates chapter audio when all sections
+    of that specific chapter have section-level audio, regardless of other chapters in the group.
+    """
+    import uuid as uuid_mod
+    from datetime import datetime
+    from database import ProjectChapter, ProjectSection
+    
+    chapter_id = config.get("chapterId")
+    if not chapter_id:
+        return
+    
+    pause_ms = config.get("pauseBetweenSegments", 500)
+    
+    chapter = db.query(ProjectChapter).filter(ProjectChapter.id == chapter_id).first()
+    if not chapter:
+        return
+    
+    sections = db.query(ProjectSection).filter(
+        ProjectSection.chapter_id == chapter_id
+    ).order_by(ProjectSection.section_index).all()
+    
+    if not sections:
+        return
+    
+    section_ids = [s.id for s in sections]
+    section_audios = db.query(ProjectAudioFile).filter(
+        ProjectAudioFile.project_id == project_id,
+        ProjectAudioFile.scope_type == "section",
+        ProjectAudioFile.scope_id.in_(section_ids),
+    ).all()
+    
+    section_audio_map = {af.scope_id: af for af in section_audios}
+    
+    if len(section_audio_map) < len(section_ids):
+        return
+    
+    ordered_blobs = []
+    for sid in section_ids:
+        if sid in section_audio_map and section_audio_map[sid].audio_data:
+            ordered_blobs.append(section_audio_map[sid].audio_data)
+        else:
+            return
+    
+    combined_mp3 = _concatenate_mp3_blobs(ordered_blobs, pause_ms * 2)
+    duration = _get_mp3_duration(combined_mp3)
+    
+    chapter_title = chapter.title or f"Chapter {chapter.chapter_index + 1}"
+    
+    existing = db.query(ProjectAudioFile).filter(
+        ProjectAudioFile.project_id == project_id,
+        ProjectAudioFile.scope_type == "chapter",
+        ProjectAudioFile.scope_id == chapter_id,
+    ).with_for_update().first()
+    if existing:
+        existing.audio_data = combined_mp3
+        existing.duration_seconds = duration
+        existing.tts_engine = tts_engine
+        existing.voice_id = narrator_voice_id
+        existing.label = chapter_title
+        existing.created_at = datetime.utcnow()
+    else:
+        af = ProjectAudioFile(
+            id=str(uuid_mod.uuid4()),
+            project_id=project_id,
+            scope_type="chapter",
+            scope_id=chapter_id,
+            audio_data=combined_mp3,
+            format="mp3",
+            duration_seconds=duration,
+            tts_engine=tts_engine,
+            voice_id=narrator_voice_id,
+            label=chapter_title,
+            settings_json=json.dumps({"ttsEngine": tts_engine, "narratorVoiceId": narrator_voice_id}),
+            created_at=datetime.utcnow(),
+        )
+        db.add(af)
+    
+    db.commit()
+    logger.info(f"Created chapter-level combined audio for chapter {chapter_id} ({chapter_title})")
+
+
+def _concatenate_mp3_blobs(mp3_blobs: List[bytes], pause_ms: int = 500) -> bytes:
+    """Concatenate multiple MP3 byte blobs into a single MP3 with pauses between them."""
+    combined = AudioSegment.empty()
+    pause = AudioSegment.silent(duration=pause_ms) if pause_ms > 0 else AudioSegment.empty()
+    
+    for i, blob in enumerate(mp3_blobs):
+        seg = AudioSegment.from_mp3(io.BytesIO(blob))
+        if i > 0 and pause_ms > 0:
+            combined += pause
+        combined += seg
+    
+    buffer = io.BytesIO()
+    combined.export(buffer, format="mp3", bitrate="192k")
+    return buffer.getvalue()
+
+
+def _get_mp3_duration(mp3_data: bytes) -> float:
+    """Get duration in seconds from MP3 bytes."""
+    try:
+        seg = AudioSegment.from_mp3(io.BytesIO(mp3_data))
+        return len(seg) / 1000.0
+    except Exception:
+        return 0.0
 
 
 async def generate_segment_audio(

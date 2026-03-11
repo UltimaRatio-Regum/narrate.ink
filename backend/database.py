@@ -93,6 +93,7 @@ class TTSJob(Base):
     narrator_voice_id = Column(String, nullable=True)
     error_message = Column(Text, nullable=True)
     config_json = Column(Text, nullable=True)
+    job_group_id = Column(String, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
     
@@ -281,6 +282,7 @@ class ProjectAudioFile(Base):
     tts_engine = Column(String, nullable=True)
     voice_id = Column(String, nullable=True)
     settings_json = Column(Text, nullable=True)
+    label = Column(String, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
 
