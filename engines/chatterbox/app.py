@@ -1,4 +1,5 @@
 import os
+
 os.environ.setdefault("OMP_NUM_THREADS", "4")
 
 import io
@@ -19,7 +20,8 @@ from typing import Optional
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("chatterbox-engine")
 
-BEARER_TOKEN = os.environ.get("API_KEY", "")
+BEARER_TOKEN = os.environ.get("API_KEY",
+                              "124CC717-7517-47A2-BBD6-54FCAE310297")
 SAMPLE_RATE = 24000
 BIT_DEPTH = 16
 CHANNELS = 1
@@ -112,9 +114,20 @@ EMOTION_PITCH_MAP = {
 }
 
 CANONICAL_EMOTIONS = [
-    "neutral", "happy", "sad", "angry", "fear",
-    "surprise", "disgust", "excited", "calm", "confused",
-    "anxious", "hopeful", "melancholy", "fearful",
+    "neutral",
+    "happy",
+    "sad",
+    "angry",
+    "fear",
+    "surprise",
+    "disgust",
+    "excited",
+    "calm",
+    "confused",
+    "anxious",
+    "hopeful",
+    "melancholy",
+    "fearful",
 ]
 
 tts_model = None
@@ -172,8 +185,10 @@ def estimate_speech_duration(text: str) -> float:
     return max(1.0, base_seconds)
 
 
-def find_speech_end(audio_np: np.ndarray, sample_rate: int, threshold_db: float = SILENCE_THRESHOLD_DB) -> int:
-    threshold_linear = 10.0 ** (threshold_db / 20.0)
+def find_speech_end(audio_np: np.ndarray,
+                    sample_rate: int,
+                    threshold_db: float = SILENCE_THRESHOLD_DB) -> int:
+    threshold_linear = 10.0**(threshold_db / 20.0)
 
     window_size = int(sample_rate * 0.02)
     abs_audio = np.abs(audio_np)
@@ -181,7 +196,7 @@ def find_speech_end(audio_np: np.ndarray, sample_rate: int, threshold_db: float 
     i = len(abs_audio) - 1
     while i >= window_size:
         window = abs_audio[max(0, i - window_size):i]
-        rms = np.sqrt(np.mean(window ** 2))
+        rms = np.sqrt(np.mean(window**2))
         if rms > threshold_linear:
             return i
         i -= window_size // 2
@@ -189,11 +204,13 @@ def find_speech_end(audio_np: np.ndarray, sample_rate: int, threshold_db: float 
     return len(audio_np)
 
 
-def find_last_silence_gap(audio_np: np.ndarray, sample_rate: int,
-                          min_expected_samples: int,
-                          threshold_db: float = SILENCE_THRESHOLD_DB,
-                          min_gap_sec: float = MIN_SILENCE_DURATION_SEC) -> int:
-    threshold_linear = 10.0 ** (threshold_db / 20.0)
+def find_last_silence_gap(
+        audio_np: np.ndarray,
+        sample_rate: int,
+        min_expected_samples: int,
+        threshold_db: float = SILENCE_THRESHOLD_DB,
+        min_gap_sec: float = MIN_SILENCE_DURATION_SEC) -> int:
+    threshold_linear = 10.0**(threshold_db / 20.0)
     min_gap_samples = int(sample_rate * min_gap_sec)
     window_size = int(sample_rate * 0.02)
     abs_audio = np.abs(audio_np)
@@ -206,7 +223,7 @@ def find_last_silence_gap(audio_np: np.ndarray, sample_rate: int,
 
     while i >= search_start:
         window = abs_audio[max(0, i - window_size):i]
-        rms = np.sqrt(np.mean(window ** 2))
+        rms = np.sqrt(np.mean(window**2))
         if rms <= threshold_linear:
             silent_run += window_size // 2
             if silent_run >= min_gap_samples:
@@ -221,22 +238,24 @@ def find_last_silence_gap(audio_np: np.ndarray, sample_rate: int,
     return best_gap_end
 
 
-def smart_trim_audio(audio_np: np.ndarray, sample_rate: int, text: str) -> np.ndarray:
+def smart_trim_audio(audio_np: np.ndarray, sample_rate: int,
+                     text: str) -> np.ndarray:
     expected_sec = estimate_speech_duration(text)
     actual_sec = len(audio_np) / sample_rate
 
     logger.info(
         f"Audio trim: expected={expected_sec:.1f}s, actual={actual_sec:.1f}s, "
-        f"samples={len(audio_np)}"
-    )
+        f"samples={len(audio_np)}")
 
     speech_end = find_speech_end(audio_np, sample_rate)
     speech_end_sec = speech_end / sample_rate
-    logger.info(f"Speech end detected at {speech_end_sec:.2f}s (sample {speech_end})")
+    logger.info(
+        f"Speech end detected at {speech_end_sec:.2f}s (sample {speech_end})")
 
     if actual_sec > expected_sec * 1.5:
         min_expected_samples = int(expected_sec * 0.7 * sample_rate)
-        gap_end = find_last_silence_gap(audio_np, sample_rate, min_expected_samples)
+        gap_end = find_last_silence_gap(audio_np, sample_rate,
+                                        min_expected_samples)
         gap_end_sec = gap_end / sample_rate
         logger.info(f"Last silence gap boundary at {gap_end_sec:.2f}s")
 
@@ -250,8 +269,7 @@ def smart_trim_audio(audio_np: np.ndarray, sample_rate: int, text: str) -> np.nd
     if trim_point < len(audio_np) * 0.3:
         logger.warning(
             f"Trim point ({trim_point / sample_rate:.2f}s) is less than 30% of audio, "
-            f"keeping full audio to avoid cutting real speech"
-        )
+            f"keeping full audio to avoid cutting real speech")
         trim_point = len(audio_np)
 
     if trim_point < len(audio_np):
@@ -263,10 +281,8 @@ def smart_trim_audio(audio_np: np.ndarray, sample_rate: int, text: str) -> np.nd
     tail_pad = np.zeros(int(sample_rate * TAIL_PAD_SEC), dtype=np.float32)
     result = np.concatenate([result, tail_pad])
 
-    logger.info(
-        f"Final audio: {len(result) / sample_rate:.2f}s "
-        f"(trimmed from {actual_sec:.2f}s)"
-    )
+    logger.info(f"Final audio: {len(result) / sample_rate:.2f}s "
+                f"(trimmed from {actual_sec:.2f}s)")
 
     return result
 
@@ -312,26 +328,27 @@ async def convert_text_to_speech(request: Request):
         body = await request.json()
         req = ConvertRequest(**body)
     except Exception as e:
-        return JSONResponse(
-            status_code=400,
-            content={"error": str(e), "error_code": "INVALID_REQUEST"}
-        )
+        return JSONResponse(status_code=400,
+                            content={
+                                "error": str(e),
+                                "error_code": "INVALID_REQUEST"
+                            })
 
     if not req.input_text.strip():
-        return JSONResponse(
-            status_code=400,
-            content={"error": "Input text is empty", "error_code": "INVALID_REQUEST"}
-        )
+        return JSONResponse(status_code=400,
+                            content={
+                                "error": "Input text is empty",
+                                "error_code": "INVALID_REQUEST"
+                            })
 
     if not req.voice_to_clone_sample:
         return JSONResponse(
             status_code=400,
             content={
                 "error": "Chatterbox requires a voice sample for cloning. "
-                         "Please provide a voice_to_clone_sample.",
+                "Please provide a voice_to_clone_sample.",
                 "error_code": "CLONING_NOT_SUPPORTED"
-            }
-        )
+            })
 
     if req.random_seed is not None and req.random_seed > 0:
         torch.manual_seed(req.random_seed)
@@ -342,24 +359,24 @@ async def convert_text_to_speech(request: Request):
 
     try:
         try:
-            wav_bytes = base64.b64decode(req.voice_to_clone_sample, validate=True)
+            wav_bytes = base64.b64decode(req.voice_to_clone_sample,
+                                         validate=True)
         except Exception:
             return JSONResponse(
                 status_code=400,
                 content={
                     "error": "Invalid voice_to_clone_sample: not valid base64",
                     "error_code": "INVALID_REQUEST"
-                }
-            )
+                })
 
         if len(wav_bytes) < 44:
             return JSONResponse(
                 status_code=400,
                 content={
-                    "error": "Invalid voice_to_clone_sample: file too small to be valid audio",
+                    "error":
+                    "Invalid voice_to_clone_sample: file too small to be valid audio",
                     "error_code": "INVALID_REQUEST"
-                }
-            )
+                })
 
         tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
         tmp.write(wav_bytes)
@@ -379,7 +396,8 @@ async def convert_text_to_speech(request: Request):
         if text and text[-1] not in '.!?;:':
             text += '.'
 
-        dominant_emotion = req.emotion_set[0].lower() if req.emotion_set else "neutral"
+        dominant_emotion = req.emotion_set[0].lower(
+        ) if req.emotion_set else "neutral"
         base_exaggeration = EMOTION_EXAGGERATION_MAP.get(dominant_emotion, 0.5)
         intensity_factor = req.intensity / 50.0
         exaggeration = min(1.0, max(0.0, base_exaggeration * intensity_factor))
@@ -398,8 +416,7 @@ async def convert_text_to_speech(request: Request):
             f"Generating with Chatterbox: emotion={dominant_emotion}, "
             f"exaggeration={exaggeration:.2f}, cfg={cfg_weight:.2f}, "
             f"temperature={temperature:.2f}, emotion_speed={emotion_speed:.3f}, "
-            f"emotion_pitch={emotion_pitch:.2f}, text_len={len(text)}"
-        )
+            f"emotion_pitch={emotion_pitch:.2f}, text_len={len(text)}")
 
         wav = tts_model.generate(
             text,
@@ -436,14 +453,12 @@ async def convert_text_to_speech(request: Request):
 
     except Exception as e:
         logger.exception("TTS generation failed")
-        return JSONResponse(
-            status_code=500,
-            content={
-                "error": "Audio generation failed",
-                "error_code": "GENERATION_FAILED",
-                "details": str(e)
-            }
-        )
+        return JSONResponse(status_code=500,
+                            content={
+                                "error": "Audio generation failed",
+                                "error_code": "GENERATION_FAILED",
+                                "details": str(e)
+                            })
     finally:
         for f in temp_files:
             try:

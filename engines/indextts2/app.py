@@ -1,4 +1,5 @@
 import os
+
 os.environ.setdefault("OMP_NUM_THREADS", "4")
 os.environ.setdefault("HF_HUB_CACHE", "./checkpoints/hf_cache")
 
@@ -20,7 +21,8 @@ from typing import Optional
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("indextts2-engine")
 
-BEARER_TOKEN = os.environ.get("API_KEY", "")
+BEARER_TOKEN = os.environ.get("API_KEY",
+                              "124CC717-7517-47A2-BBD6-54FCAE310297")
 SAMPLE_RATE = 22050
 BIT_DEPTH = 16
 CHANNELS = 1
@@ -28,22 +30,22 @@ MAX_SECONDS = 60
 MAX_CHARS = 500
 
 VOXLIBRIS_TO_INDEXTTS2_EMOTIONS = {
-    "neutral":    [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.8],
-    "happy":      [0.8, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.1],
-    "angry":      [0.0, 0.8, 0.0, 0.0, 0.0, 0.0, 0.0, 0.1],
-    "sad":        [0.0, 0.0, 0.8, 0.0, 0.0, 0.0, 0.0, 0.1],
-    "fear":       [0.0, 0.0, 0.0, 0.8, 0.0, 0.0, 0.0, 0.1],
-    "disgust":    [0.0, 0.0, 0.0, 0.0, 0.8, 0.0, 0.0, 0.1],
+    "neutral": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.8],
+    "happy": [0.8, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.1],
+    "angry": [0.0, 0.8, 0.0, 0.0, 0.0, 0.0, 0.0, 0.1],
+    "sad": [0.0, 0.0, 0.8, 0.0, 0.0, 0.0, 0.0, 0.1],
+    "fear": [0.0, 0.0, 0.0, 0.8, 0.0, 0.0, 0.0, 0.1],
+    "disgust": [0.0, 0.0, 0.0, 0.0, 0.8, 0.0, 0.0, 0.1],
     "melancholy": [0.0, 0.0, 0.2, 0.0, 0.0, 0.6, 0.0, 0.1],
-    "surprise":   [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.7, 0.1],
-    "calm":       [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.8],
-    "excited":    [0.6, 0.0, 0.0, 0.0, 0.0, 0.0, 0.2, 0.0],
-    "anxious":    [0.0, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 0.2],
-    "hopeful":    [0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.3],
-    "tender":     [0.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.5],
-    "proud":      [0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.1, 0.2],
-    "fearful":    [0.0, 0.0, 0.0, 0.8, 0.0, 0.0, 0.0, 0.1],
-    "confused":   [0.0, 0.0, 0.0, 0.2, 0.0, 0.0, 0.3, 0.3],
+    "surprise": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.7, 0.1],
+    "calm": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.8],
+    "excited": [0.6, 0.0, 0.0, 0.0, 0.0, 0.0, 0.2, 0.0],
+    "anxious": [0.0, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 0.2],
+    "hopeful": [0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.3],
+    "tender": [0.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.5],
+    "proud": [0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.1, 0.2],
+    "fearful": [0.0, 0.0, 0.0, 0.8, 0.0, 0.0, 0.0, 0.1],
+    "confused": [0.0, 0.0, 0.0, 0.2, 0.0, 0.0, 0.3, 0.3],
 }
 
 EMOTION_SPEED_MAP = {
@@ -85,10 +87,22 @@ EMOTION_PITCH_MAP = {
 }
 
 CANONICAL_EMOTIONS = [
-    "neutral", "happy", "sad", "angry", "fear",
-    "surprise", "disgust", "excited", "calm",
-    "anxious", "hopeful", "melancholy", "tender", "proud",
-    "fearful", "confused",
+    "neutral",
+    "happy",
+    "sad",
+    "angry",
+    "fear",
+    "surprise",
+    "disgust",
+    "excited",
+    "calm",
+    "anxious",
+    "hopeful",
+    "melancholy",
+    "tender",
+    "proud",
+    "fearful",
+    "confused",
 ]
 
 tts_model = None
@@ -102,11 +116,13 @@ def load_model():
     cfg_path = os.path.join(model_dir, "config.yaml")
 
     if not os.path.exists(cfg_path):
-        logger.info("Model not found locally, downloading IndexTeam/IndexTTS-2...")
+        logger.info(
+            "Model not found locally, downloading IndexTeam/IndexTTS-2...")
         from huggingface_hub import snapshot_download
         snapshot_download("IndexTeam/IndexTTS-2", local_dir=model_dir)
         logger.info("Model download complete.")
-    use_fp16 = os.environ.get("USE_FP16", "true").lower() in ("true", "1", "yes")
+    use_fp16 = os.environ.get("USE_FP16",
+                              "true").lower() in ("true", "1", "yes")
 
     device = None
     if torch.cuda.is_available():
@@ -118,7 +134,9 @@ def load_model():
         device = "cpu"
         use_fp16 = False
 
-    logger.info(f"Loading IndexTTS2 model from {model_dir} on {device} (fp16={use_fp16})...")
+    logger.info(
+        f"Loading IndexTTS2 model from {model_dir} on {device} (fp16={use_fp16})..."
+    )
     tts_model = IndexTTS2(
         cfg_path=cfg_path,
         model_dir=model_dir,
@@ -158,11 +176,13 @@ def numpy_to_wav_bytes(audio_np: np.ndarray, sample_rate: int) -> bytes:
     return buf.getvalue()
 
 
-def blend_emotion_vectors(emotion_set: list[str], intensity: int) -> list[float]:
+def blend_emotion_vectors(emotion_set: list[str],
+                          intensity: int) -> list[float]:
     intensity_factor = intensity / 50.0
 
     if not emotion_set or emotion_set == ["neutral"]:
-        base = VOXLIBRIS_TO_INDEXTTS2_EMOTIONS.get("neutral", [0.0]*7 + [0.8])
+        base = VOXLIBRIS_TO_INDEXTTS2_EMOTIONS.get("neutral",
+                                                   [0.0] * 7 + [0.8])
         return list(base)
 
     blended = [0.0] * 8
@@ -216,9 +236,12 @@ async def get_engine_details(request: Request):
         "builtin_voices": [],
         "supported_emotions": CANONICAL_EMOTIONS,
         "extra_properties": {
-            "model": "IndexTeam/IndexTTS-2",
-            "max_characters": MAX_CHARS,
-            "emotion_control": "8-dimensional emotion vectors via fine-tuned Qwen3",
+            "model":
+            "IndexTeam/IndexTTS-2",
+            "max_characters":
+            MAX_CHARS,
+            "emotion_control":
+            "8-dimensional emotion vectors via fine-tuned Qwen3",
             "features": [
                 "zero-shot voice cloning",
                 "emotion-speaker disentanglement",
@@ -237,26 +260,27 @@ async def convert_text_to_speech(request: Request):
         body = await request.json()
         req = ConvertRequest(**body)
     except Exception as e:
-        return JSONResponse(
-            status_code=400,
-            content={"error": str(e), "error_code": "INVALID_REQUEST"}
-        )
+        return JSONResponse(status_code=400,
+                            content={
+                                "error": str(e),
+                                "error_code": "INVALID_REQUEST"
+                            })
 
     if not req.input_text.strip():
-        return JSONResponse(
-            status_code=400,
-            content={"error": "Input text is empty", "error_code": "INVALID_REQUEST"}
-        )
+        return JSONResponse(status_code=400,
+                            content={
+                                "error": "Input text is empty",
+                                "error_code": "INVALID_REQUEST"
+                            })
 
     if not req.voice_to_clone_sample:
         return JSONResponse(
             status_code=400,
             content={
                 "error": "IndexTTS2 requires a voice sample for cloning. "
-                         "Please provide a voice_to_clone_sample.",
+                "Please provide a voice_to_clone_sample.",
                 "error_code": "INVALID_REQUEST"
-            }
-        )
+            })
 
     if req.random_seed is not None and req.random_seed > 0:
         torch.manual_seed(req.random_seed)
@@ -267,24 +291,24 @@ async def convert_text_to_speech(request: Request):
 
     try:
         try:
-            wav_bytes = base64.b64decode(req.voice_to_clone_sample, validate=True)
+            wav_bytes = base64.b64decode(req.voice_to_clone_sample,
+                                         validate=True)
         except Exception:
             return JSONResponse(
                 status_code=400,
                 content={
                     "error": "Invalid voice_to_clone_sample: not valid base64",
                     "error_code": "INVALID_REQUEST"
-                }
-            )
+                })
 
         if len(wav_bytes) < 44:
             return JSONResponse(
                 status_code=400,
                 content={
-                    "error": "Invalid voice_to_clone_sample: file too small to be valid audio",
+                    "error":
+                    "Invalid voice_to_clone_sample: file too small to be valid audio",
                     "error_code": "INVALID_REQUEST"
-                }
-            )
+                })
 
         tmp_voice = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
         tmp_voice.write(wav_bytes)
@@ -309,7 +333,8 @@ async def convert_text_to_speech(request: Request):
         if text and text[-1] not in '.!?;:。！？；：':
             text += '.'
 
-        dominant_emotion = req.emotion_set[0].lower() if req.emotion_set else "neutral"
+        dominant_emotion = req.emotion_set[0].lower(
+        ) if req.emotion_set else "neutral"
         emo_vector = blend_emotion_vectors(req.emotion_set, req.intensity)
         emo_vector = tts_model.normalize_emo_vec(emo_vector, apply_bias=True)
 
@@ -320,14 +345,13 @@ async def convert_text_to_speech(request: Request):
         emotion_speed = 1.0 + (emotion_speed - 1.0) * intensity_factor
         emotion_pitch = emotion_pitch * intensity_factor
 
-        is_neutral = all(e.lower() in ("neutral", "calm") for e in req.emotion_set)
+        is_neutral = all(e.lower() in ("neutral", "calm")
+                         for e in req.emotion_set)
 
-        logger.info(
-            f"Generating with IndexTTS2: emotions={req.emotion_set}, "
-            f"emo_vector={[f'{v:.2f}' for v in emo_vector]}, "
-            f"intensity={req.intensity}, text_len={len(text)}, "
-            f"is_neutral={is_neutral}"
-        )
+        logger.info(f"Generating with IndexTTS2: emotions={req.emotion_set}, "
+                    f"emo_vector={[f'{v:.2f}' for v in emo_vector]}, "
+                    f"intensity={req.intensity}, text_len={len(text)}, "
+                    f"is_neutral={is_neutral}")
 
         kwargs = {
             "spk_audio_prompt": speaker_wav_path,
@@ -341,14 +365,13 @@ async def convert_text_to_speech(request: Request):
 
         tts_model.infer(**kwargs)
 
-        if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
-            return JSONResponse(
-                status_code=500,
-                content={
-                    "error": "IndexTTS2 produced no output",
-                    "error_code": "GENERATION_FAILED"
-                }
-            )
+        if not os.path.exists(output_path) or os.path.getsize(
+                output_path) == 0:
+            return JSONResponse(status_code=500,
+                                content={
+                                    "error": "IndexTTS2 produced no output",
+                                    "error_code": "GENERATION_FAILED"
+                                })
 
         import torchaudio
         wav_tensor, sr = torchaudio.load(output_path)
@@ -356,7 +379,9 @@ async def convert_text_to_speech(request: Request):
 
         if sr != SAMPLE_RATE:
             import librosa
-            audio_np = librosa.resample(audio_np, orig_sr=sr, target_sr=SAMPLE_RATE)
+            audio_np = librosa.resample(audio_np,
+                                        orig_sr=sr,
+                                        target_sr=SAMPLE_RATE)
 
         peak = np.max(np.abs(audio_np))
         if peak > 0:
@@ -385,14 +410,12 @@ async def convert_text_to_speech(request: Request):
 
     except Exception as e:
         logger.exception("TTS generation failed")
-        return JSONResponse(
-            status_code=500,
-            content={
-                "error": "Audio generation failed",
-                "error_code": "GENERATION_FAILED",
-                "details": str(e)
-            }
-        )
+        return JSONResponse(status_code=500,
+                            content={
+                                "error": "Audio generation failed",
+                                "error_code": "GENERATION_FAILED",
+                                "details": str(e)
+                            })
     finally:
         for f in temp_files:
             try:

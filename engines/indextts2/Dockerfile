@@ -14,6 +14,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN useradd -m -u 1000 user
 WORKDIR /app
 
+RUN pip install --no-cache-dir torch==2.8.0 torchaudio==2.8.0
+
+RUN pip install --no-cache-dir "indextts[webui] @ git+https://github.com/index-tts/index-tts.git@main"
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 

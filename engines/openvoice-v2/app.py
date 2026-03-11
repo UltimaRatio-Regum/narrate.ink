@@ -18,74 +18,146 @@ from typing import Optional
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("openvoice-v2-engine")
 
-BEARER_TOKEN = os.environ.get("API_KEY", "")
+BEARER_TOKEN = os.environ.get("API_KEY",
+                              "124CC717-7517-47A2-BBD6-54FCAE310297")
 SAMPLE_RATE = 44100
 BIT_DEPTH = 16
 CHANNELS = 1
 MAX_SECONDS = 30
 
 CANONICAL_EMOTIONS = [
-    "neutral", "happy", "sad", "angry", "fear",
-    "surprise", "disgust", "excited", "calm", "confused",
-    "anxious", "hopeful", "melancholy", "fearful",
+    "neutral",
+    "happy",
+    "sad",
+    "angry",
+    "fear",
+    "surprise",
+    "disgust",
+    "excited",
+    "calm",
+    "confused",
+    "anxious",
+    "hopeful",
+    "melancholy",
+    "fearful",
 ]
 
 EMOTION_SPEED_MAP = {
-    "neutral":    1.0,
-    "happy":      1.05,
-    "sad":        0.93,
-    "angry":      1.08,
-    "fear":       1.06,
-    "surprise":   1.07,
-    "disgust":    0.97,
-    "excited":    1.10,
-    "calm":       0.92,
-    "confused":   0.96,
-    "anxious":    1.04,
-    "hopeful":    1.02,
+    "neutral": 1.0,
+    "happy": 1.05,
+    "sad": 0.93,
+    "angry": 1.08,
+    "fear": 1.06,
+    "surprise": 1.07,
+    "disgust": 0.97,
+    "excited": 1.10,
+    "calm": 0.92,
+    "confused": 0.96,
+    "anxious": 1.04,
+    "hopeful": 1.02,
     "melancholy": 0.94,
-    "fearful":    1.06,
+    "fearful": 1.06,
 }
 
 EMOTION_PITCH_MAP = {
-    "neutral":    0.0,
-    "happy":      0.6,
-    "sad":       -0.5,
-    "angry":     -0.3,
-    "fear":       0.4,
-    "surprise":   0.7,
-    "disgust":   -0.2,
-    "excited":    0.8,
-    "calm":       0.0,
-    "confused":   0.3,
-    "anxious":    0.3,
-    "hopeful":    0.4,
-    "melancholy":-0.4,
-    "fearful":    0.4,
+    "neutral": 0.0,
+    "happy": 0.6,
+    "sad": -0.5,
+    "angry": -0.3,
+    "fear": 0.4,
+    "surprise": 0.7,
+    "disgust": -0.2,
+    "excited": 0.8,
+    "calm": 0.0,
+    "confused": 0.3,
+    "anxious": 0.3,
+    "hopeful": 0.4,
+    "melancholy": -0.4,
+    "fearful": 0.4,
 }
 
 BUILTIN_SPEAKERS = {
     "EN": [
-        {"id": "en-default", "display_name": "English Default", "extra_info": "Standard English voice", "lang": "EN_NEWEST", "spk_key": "en-newest"},
-        {"id": "en-us", "display_name": "English (US)", "extra_info": "American English voice", "lang": "EN", "spk_key": "en-us"},
-        {"id": "en-br", "display_name": "English (British)", "extra_info": "British English voice", "lang": "EN", "spk_key": "en-br"},
-        {"id": "en-au", "display_name": "English (Australian)", "extra_info": "Australian English voice", "lang": "EN", "spk_key": "en-au"},
-        {"id": "en-india", "display_name": "English (Indian)", "extra_info": "Indian English voice", "lang": "EN", "spk_key": "en-india"},
+        {
+            "id": "en-default",
+            "display_name": "English Default",
+            "extra_info": "Standard English voice",
+            "lang": "EN_NEWEST",
+            "spk_key": "en-newest"
+        },
+        {
+            "id": "en-us",
+            "display_name": "English (US)",
+            "extra_info": "American English voice",
+            "lang": "EN",
+            "spk_key": "en-us"
+        },
+        {
+            "id": "en-br",
+            "display_name": "English (British)",
+            "extra_info": "British English voice",
+            "lang": "EN",
+            "spk_key": "en-br"
+        },
+        {
+            "id": "en-au",
+            "display_name": "English (Australian)",
+            "extra_info": "Australian English voice",
+            "lang": "EN",
+            "spk_key": "en-au"
+        },
+        {
+            "id": "en-india",
+            "display_name": "English (Indian)",
+            "extra_info": "Indian English voice",
+            "lang": "EN",
+            "spk_key": "en-india"
+        },
     ],
     "ES": [
-        {"id": "es-default", "display_name": "Spanish", "extra_info": "Spanish voice", "lang": "ES", "spk_key": "es"},
+        {
+            "id": "es-default",
+            "display_name": "Spanish",
+            "extra_info": "Spanish voice",
+            "lang": "ES",
+            "spk_key": "es"
+        },
     ],
     "FR": [
-        {"id": "fr-default", "display_name": "French", "extra_info": "French voice", "lang": "FR", "spk_key": "fr"},
+        {
+            "id": "fr-default",
+            "display_name": "French",
+            "extra_info": "French voice",
+            "lang": "FR",
+            "spk_key": "fr"
+        },
     ],
     "ZH": [
-        {"id": "zh-default", "display_name": "Chinese", "extra_info": "Chinese Mandarin voice", "lang": "ZH", "spk_key": "zh"},
+        {
+            "id": "zh-default",
+            "display_name": "Chinese",
+            "extra_info": "Chinese Mandarin voice",
+            "lang": "ZH",
+            "spk_key": "zh"
+        },
     ],
     "JP": [
-        {"id": "jp-default", "display_name": "Japanese", "extra_info": "Japanese voice", "lang": "JP", "spk_key": "jp"},
+        {
+            "id": "jp-default",
+            "display_name": "Japanese",
+            "extra_info": "Japanese voice",
+            "lang": "JP",
+            "spk_key": "jp"
+        },
     ],
     "KR": [
-        {"id": "kr-default", "display_name": "Korean", "extra_info": "Korean voice", "lang": "KR", "spk_key": "kr"},
+        {
+            "id": "kr-default",
+            "display_name": "Korean",
+            "extra_info": "Korean voice",
+            "lang": "KR",
+            "spk_key": "kr"
+        },
     ],
 }
 
@@ -117,9 +189,8 @@ def load_models():
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
     logger.info(f"Loading ToneColorConverter on {device}...")
-    tone_color_converter = ToneColorConverter(
-        f"{ckpt_converter}/config.json", device=device
-    )
+    tone_color_converter = ToneColorConverter(f"{ckpt_converter}/config.json",
+                                              device=device)
     tone_color_converter.load_ckpt(f"{ckpt_converter}/checkpoint.pth")
     logger.info("ToneColorConverter loaded.")
 
@@ -159,10 +230,11 @@ def verify_auth(request: Request):
         return
     auth = request.headers.get("Authorization", "")
     if auth != f"Bearer {BEARER_TOKEN}":
-        return JSONResponse(
-            status_code=401,
-            content={"error": "Unauthorized", "error_code": "UNAUTHORIZED"}
-        )
+        return JSONResponse(status_code=401,
+                            content={
+                                "error": "Unauthorized",
+                                "error_code": "UNAUTHORIZED"
+                            })
     return None
 
 
@@ -210,8 +282,10 @@ async def get_engine_details(request: Request):
         "base_voices": ALL_VOICES,
         "supported_emotions": CANONICAL_EMOTIONS,
         "extra_properties": {
-            "architecture": "MeloTTS base + ToneColorConverter for voice cloning",
-            "languages": ["English", "Spanish", "French", "Chinese", "Japanese", "Korean"],
+            "architecture":
+            "MeloTTS base + ToneColorConverter for voice cloning",
+            "languages":
+            ["English", "Spanish", "French", "Chinese", "Japanese", "Korean"],
         }
     }
 
@@ -226,16 +300,18 @@ async def convert_text_to_speech(request: Request):
         body = await request.json()
         req = ConvertRequest(**body)
     except Exception as e:
-        return JSONResponse(
-            status_code=400,
-            content={"error": str(e), "error_code": "INVALID_REQUEST"}
-        )
+        return JSONResponse(status_code=400,
+                            content={
+                                "error": str(e),
+                                "error_code": "INVALID_REQUEST"
+                            })
 
     if not req.input_text.strip():
-        return JSONResponse(
-            status_code=400,
-            content={"error": "Input text is empty", "error_code": "INVALID_REQUEST"}
-        )
+        return JSONResponse(status_code=400,
+                            content={
+                                "error": "Input text is empty",
+                                "error_code": "INVALID_REQUEST"
+                            })
 
     effective_voice_id = req.base_voice_id or req.builtin_voice_id or "en-default"
     voice_id = req.builtin_voice_id or effective_voice_id
@@ -246,9 +322,9 @@ async def convert_text_to_speech(request: Request):
             content={
                 "error": f"Voice '{voice_id}' not found",
                 "error_code": "VOICE_NOT_FOUND",
-                "details": f"Available voices: {', '.join(VOICE_LOOKUP.keys())}"
-            }
-        )
+                "details":
+                f"Available voices: {', '.join(VOICE_LOOKUP.keys())}"
+            })
 
     if req.random_seed is not None:
         torch.manual_seed(req.random_seed)
@@ -270,10 +346,13 @@ async def convert_text_to_speech(request: Request):
         if not melo_model:
             return JSONResponse(
                 status_code=500,
-                content={"error": f"TTS model for language {lang_key} not loaded", "error_code": "GENERATION_FAILED"}
-            )
+                content={
+                    "error": f"TTS model for language {lang_key} not loaded",
+                    "error_code": "GENERATION_FAILED"
+                })
 
-        dominant_emotion = req.emotion_set[0].lower() if req.emotion_set else "neutral"
+        dominant_emotion = req.emotion_set[0].lower(
+        ) if req.emotion_set else "neutral"
         if dominant_emotion not in EMOTION_SPEED_MAP:
             dominant_emotion = "neutral"
 
@@ -289,8 +368,7 @@ async def convert_text_to_speech(request: Request):
         logger.info(
             f"Emotion: {dominant_emotion}, intensity: {req.intensity}, "
             f"emotion_speed: {emotion_speed:.3f}, emotion_pitch: {emotion_pitch:.2f}, "
-            f"final_speed: {speed:.3f}"
-        )
+            f"final_speed: {speed:.3f}")
 
         spk2id = melo_model.hps.data.spk2id
         melo_lang = voice_info["lang"]
@@ -303,7 +381,9 @@ async def convert_text_to_speech(request: Request):
                 break
 
         if speaker_id_value is None:
-            logger.warning(f"Speaker key '{voice_info['spk_key']}' not found in MeloTTS model, available: {list(spk2id.keys())}")
+            logger.warning(
+                f"Speaker key '{voice_info['spk_key']}' not found in MeloTTS model, available: {list(spk2id.keys())}"
+            )
             speaker_id_value = list(spk2id.values())[0]
 
         tmp_base = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
@@ -325,14 +405,19 @@ async def convert_text_to_speech(request: Request):
             except Exception:
                 return JSONResponse(
                     status_code=400,
-                    content={"error": "Invalid base64 in voice_to_clone_sample", "error_code": "INVALID_REQUEST"}
-                )
+                    content={
+                        "error": "Invalid base64 in voice_to_clone_sample",
+                        "error_code": "INVALID_REQUEST"
+                    })
 
             if len(wav_bytes) < 100:
                 return JSONResponse(
                     status_code=400,
-                    content={"error": "Voice clone sample is too small to be valid audio", "error_code": "INVALID_REQUEST"}
-                )
+                    content={
+                        "error":
+                        "Voice clone sample is too small to be valid audio",
+                        "error_code": "INVALID_REQUEST"
+                    })
 
             tmp_ref = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
             tmp_ref.write(wav_bytes)
@@ -344,13 +429,16 @@ async def convert_text_to_speech(request: Request):
             except Exception:
                 return JSONResponse(
                     status_code=400,
-                    content={"error": "Voice clone sample is not a valid audio file", "error_code": "INVALID_REQUEST"}
-                )
+                    content={
+                        "error":
+                        "Voice clone sample is not a valid audio file",
+                        "error_code": "INVALID_REQUEST"
+                    })
 
             device = "cuda:0" if torch.cuda.is_available() else "cpu"
-            target_se, _ = se_extractor.get_se(
-                tmp_ref.name, tone_color_converter, vad=False
-            )
+            target_se, _ = se_extractor.get_se(tmp_ref.name,
+                                               tone_color_converter,
+                                               vad=False)
 
             src_se = source_ses.get(effective_voice_id)
             if src_se is None:
@@ -359,8 +447,10 @@ async def convert_text_to_speech(request: Request):
             if src_se is None:
                 return JSONResponse(
                     status_code=500,
-                    content={"error": "No source speaker embedding available", "error_code": "GENERATION_FAILED"}
-                )
+                    content={
+                        "error": "No source speaker embedding available",
+                        "error_code": "GENERATION_FAILED"
+                    })
 
             tmp_out = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
             tmp_out.close()
@@ -406,8 +496,7 @@ async def convert_text_to_speech(request: Request):
                 "error": f"Audio generation failed: {type(e).__name__}: {e}",
                 "error_code": "GENERATION_FAILED",
                 "traceback": tb,
-            }
-        )
+            })
     finally:
         for f in temp_files:
             try:
