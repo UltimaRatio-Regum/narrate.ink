@@ -2315,8 +2315,12 @@ async def merge_speakers(project_id: str, request: MergeSpeakersRequest):
         db.close()
 
 
+class SegmentProjectRequest(BaseModel):
+    model: str = "openai/gpt-4.1-mini"
+
 @app.post("/projects/{project_id}/segment")
-async def segment_project(project_id: str):
+async def segment_project(project_id: str, request: Optional[SegmentProjectRequest] = None):
+    model = request.model if request else "openai/gpt-4.1-mini"
     db = get_db_session()
     try:
         project = db.query(Project).filter(Project.id == project_id).first()
@@ -2351,7 +2355,7 @@ async def segment_project(project_id: str):
     finally:
         db.close()
 
-    segment_project_background(project_id, use_llm=True)
+    segment_project_background(project_id, model=model)
     return {"success": True, "message": "Segmentation started"}
 
 

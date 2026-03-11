@@ -3,15 +3,16 @@ import re
 import json
 import logging
 import os
+import asyncio
 import threading
 from typing import Optional, List
+from pathlib import Path
 
 import httpx
 
 from database import (
     get_db_session, Project, ProjectChapter, ProjectSection, ProjectChunk
 )
-from text_parser import TextParser
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +20,26 @@ SECTION_WORD_LIMIT = 300
 MAX_CHUNKS_PER_SECTION = 30
 WORDS_PER_SECOND = 2.5
 
-text_parser = TextParser()
+DEFAULT_MODEL = "openai/gpt-4.1-mini"
+
+CANONICAL_EMOTIONS = [
+    "neutral", "happy", "sad", "angry", "fear", "disgust", "surprise",
+    "excited", "calm", "anxious", "hopeful", "melancholy", "tender", "proud",
+]
+
+PARSING_PROMPT_FILE = Path("parsing_prompt_settings.json")
+
+
+def _load_custom_prompt() -> Optional[str]:
+    if PARSING_PROMPT_FILE.exists():
+        try:
+            with open(PARSING_PROMPT_FILE, "r") as f:
+                data = json.load(f)
+            if data.get("prompt"):
+                return data["prompt"]
+        except Exception as e:
+            logger.warning(f"Failed to load custom parsing prompt: {e}")
+    return None
 
 
 def split_into_sections(raw_text: str, word_limit: int = SECTION_WORD_LIMIT) -> list[str]:
@@ -56,6 +76,151 @@ def split_into_sections(raw_text: str, word_limit: int = SECTION_WORD_LIMIT) -> 
         sections.append("\n\n".join(current))
 
     return sections
+
+
+def _rechunk_segment(text: str, max_words: int = 30) -> list[str]:
+    words = text.split()
+    if len(words) <= max_words:
+        return [text]
+
+    chunks = []
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    current = []
+    current_wc = 0
+    for sent in sentences:
+        swc = len(sent.split())
+        if current_wc + swc > max_words and current:
+            chunks.append(" ".join(current))
+            current = [sent]
+            current_wc = swc
+        else:
+            current.append(sent)
+            current_wc += swc
+    if current:
+        chunks.append(" ".join(current))
+    return chunks
+
+
+def _validate_llm_response(data: dict) -> bool:
+    if not isinstance(data, dict):
+        return False
+    if "segments" not in data or not isinstance(data.get("segments"), list):
+        return False
+    for seg in data["segments"]:
+        if not isinstance(seg, dict):
+            return False
+        if "type" not in seg or "text" not in seg:
+            return False
+        if seg["type"] not in ["narration", "dialogue"]:
+            return False
+    return True
+
+
+async def _call_llm_for_section(
+    client: httpx.AsyncClient,
+    section_text: str,
+    known_speakers: list[str],
+    context: str,
+    model: str,
+    base_url: str,
+    api_key: str,
+) -> dict:
+    speaker_hint = ""
+    if known_speakers:
+        speaker_hint = f"\nKnown speakers from previous sections: {', '.join(known_speakers)}. Use these names when you recognize the same characters.\n"
+
+    custom_prompt = _load_custom_prompt()
+    emotions_str = ", ".join(CANONICAL_EMOTIONS)
+
+    if custom_prompt:
+        prompt_body = custom_prompt.replace("${VALID_EMOTIONS}", emotions_str)
+        prompt = f"""{prompt_body}
+{speaker_hint}
+Previous context: {context[:500] if context else 'Start of text'}
+
+TEXT TO ANALYZE:
+{section_text}
+
+Return ONLY valid JSON, no markdown fences."""
+    else:
+        prompt = f"""You are chunking text for a text-to-speech audiobook engine. Each chunk will be sent to a TTS engine as a separate audio clip, so chunk size directly controls audio segment length.
+
+TARGET: Each chunk must be 20-30 words (8-12 seconds of speech at 2.5 words/second). This is critical — TTS engines produce poor quality on long inputs.
+
+CHUNKING RULES (in priority order):
+1. QUOTE BOUNDARIES: Quoted dialogue must always be its own chunk, separate from surrounding narration. Never mix dialogue and narration in one chunk.
+2. SIZE LIMIT: No chunk may exceed 30 words. If a sentence or paragraph is longer than 30 words, you MUST split it at a natural pause point:
+   - First preference: sentence boundaries (periods, question marks, exclamation marks)
+   - Second preference: semicolons, colons, or em-dashes
+   - Third preference: commas or conjunctions (and, but, or, so, yet, because, though, while)
+3. MINIMUM SIZE: Avoid chunks under 10 words unless they are short dialogue (e.g. "Yes," he said).
+4. TYPE: Each chunk is either "narration" or "dialogue", never both.
+5. SPEAKER: For dialogue, identify the speaker by name from context. For narration, speaker is null.
+6. EMOTION: Assign exactly one emotion per chunk from: {emotions_str}
+7. PRESERVE TEXT: Copy the original text exactly — do not paraphrase, summarize, or omit any words.
+{speaker_hint}
+Previous context: {context[:500] if context else 'Start of text'}
+
+TEXT TO ANALYZE:
+{section_text}
+
+Return ONLY a JSON object:
+{{
+  "segments": [
+    {{
+      "type": "narration" or "dialogue",
+      "text": "exact text from the passage",
+      "speaker": "speaker name or null for narration",
+      "emotion": "one emotion from the list above"
+    }}
+  ],
+  "detectedSpeakers": ["list", "of", "speaker", "names"]
+}}
+
+Return ONLY valid JSON, no markdown fences."""
+
+    try:
+        response = await client.post(
+            f"{base_url}/chat/completions",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": "You are a text analysis assistant. Always respond with valid JSON only."},
+                    {"role": "user", "content": prompt}
+                ],
+                "temperature": 0.3,
+                "max_tokens": 4096,
+            },
+            timeout=90.0,
+        )
+        response.raise_for_status()
+        data = response.json()
+        content = data["choices"][0]["message"]["content"]
+
+        content = content.strip()
+        if content.startswith("```json"):
+            content = content[7:]
+        if content.startswith("```"):
+            content = content[3:]
+        if content.endswith("```"):
+            content = content[:-3]
+
+        result = json.loads(content.strip())
+
+        if not _validate_llm_response(result):
+            raise ValueError("LLM response failed validation")
+
+        if not result.get("segments"):
+            raise ValueError("LLM returned empty segments")
+
+        return result
+    except Exception as e:
+        logger.error(f"LLM call failed for section: {e}")
+        raise
 
 
 def _split_section_by_chunk_count(db, section, max_chunks: int = MAX_CHUNKS_PER_SECTION):
@@ -104,7 +269,7 @@ def _reindex_sections(db, chapter_id: str):
     db.commit()
 
 
-def _generate_section_titles(db, chapter_id: str):
+def _generate_section_titles(db, chapter_id: str, model: str = "openai/gpt-4.1-mini"):
     base_url = os.environ.get("AI_INTEGRATIONS_OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
     api_key = os.environ.get("AI_INTEGRATIONS_OPENROUTER_API_KEY", "")
 
@@ -150,7 +315,7 @@ def _generate_section_titles(db, chapter_id: str):
                 "Content-Type": "application/json",
             },
             json={
-                "model": "openai/gpt-4o-mini",
+                "model": model,
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.3,
                 "response_format": {"type": "json_object"},
@@ -179,17 +344,37 @@ def _generate_section_titles(db, chapter_id: str):
         logger.warning(f"Failed to generate section titles: {e}")
 
 
-def segment_project_background(project_id: str, use_llm: bool = False):
+def segment_project_background(project_id: str, model: str = DEFAULT_MODEL):
     thread = threading.Thread(
-        target=_run_segmentation,
-        args=(project_id, use_llm),
+        target=_run_segmentation_wrapper,
+        args=(project_id, model),
         daemon=True
     )
     thread.start()
     return thread
 
 
-def _run_segmentation(project_id: str, use_llm: bool = False):
+def _run_segmentation_wrapper(project_id: str, model: str):
+    asyncio.run(_run_segmentation(project_id, model))
+
+
+async def _run_segmentation(project_id: str, model: str):
+    base_url = os.environ.get("AI_INTEGRATIONS_OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+    api_key = os.environ.get("AI_INTEGRATIONS_OPENROUTER_API_KEY", "")
+
+    if not api_key:
+        db = get_db_session()
+        try:
+            project = db.query(Project).filter(Project.id == project_id).first()
+            if project:
+                project.status = "failed"
+                project.error_message = "OpenRouter API key not configured. Please set up the AI integration in Settings."
+                db.commit()
+        finally:
+            db.close()
+        logger.error(f"Project {project_id} segmentation failed: OpenRouter API key not configured")
+        return
+
     db = get_db_session()
     try:
         project = db.query(Project).filter(Project.id == project_id).first()
@@ -206,100 +391,97 @@ def _run_segmentation(project_id: str, use_llm: bool = False):
 
         all_known_speakers: list[str] = []
 
-        for chapter in chapters:
-            try:
-                chapter.status = "segmenting"
-                db.commit()
-
-                section_texts = split_into_sections(chapter.raw_text)
-                chunk_global_index = 0
-
-                all_chapter_sections = []
-
-                for sec_idx, section_text in enumerate(section_texts):
-                    section = ProjectSection(
-                        id=str(uuid.uuid4()),
-                        chapter_id=chapter.id,
-                        section_index=sec_idx,
-                        status="processing",
-                    )
-                    db.add(section)
+        async with httpx.AsyncClient() as client:
+            for chapter in chapters:
+                try:
+                    chapter.status = "segmenting"
                     db.commit()
 
-                    try:
-                        segments, detected_speakers = text_parser.parse(
-                            section_text, known_speakers=all_known_speakers
+                    section_texts = split_into_sections(chapter.raw_text)
+                    chunk_global_index = 0
+
+                    all_chapter_sections = []
+                    context = ""
+
+                    for sec_idx, section_text in enumerate(section_texts):
+                        section = ProjectSection(
+                            id=str(uuid.uuid4()),
+                            chapter_id=chapter.id,
+                            section_index=sec_idx,
+                            status="processing",
                         )
-                        for sp in detected_speakers:
-                            if sp and sp not in all_known_speakers:
-                                all_known_speakers.append(sp)
+                        db.add(section)
+                        db.commit()
 
-                        for seg_idx, seg in enumerate(segments):
-                            if hasattr(seg, 'dict'):
-                                seg_dict = seg.dict() if hasattr(seg, 'dict') else seg
-                            else:
-                                seg_dict = seg
-
-                            seg_text = seg_dict.get("text", "") if isinstance(seg_dict, dict) else getattr(seg, "text", "")
-                            seg_type = seg_dict.get("type", "narration") if isinstance(seg_dict, dict) else getattr(seg, "type", "narration")
-                            seg_speaker = seg_dict.get("speaker") if isinstance(seg_dict, dict) else getattr(seg, "speaker", None)
-                            seg_sentiment = seg_dict.get("sentiment") if isinstance(seg_dict, dict) else getattr(seg, "sentiment", None)
-                            seg_wc = seg_dict.get("wordCount") if isinstance(seg_dict, dict) else getattr(seg, "wordCount", None)
-
-                            wc = seg_wc or len(seg_text.split())
-                            emotion = "neutral"
-                            if seg_sentiment:
-                                if isinstance(seg_sentiment, dict):
-                                    emotion = seg_sentiment.get("label", "neutral")
-                                elif hasattr(seg_sentiment, "label"):
-                                    emotion = seg_sentiment.label
-
-                            chunk = ProjectChunk(
-                                id=str(uuid.uuid4()),
-                                section_id=section.id,
-                                chunk_index=chunk_global_index,
-                                text=seg_text,
-                                segment_type=seg_type,
-                                speaker=seg_speaker,
-                                emotion=emotion,
-                                word_count=wc,
-                                approx_duration_seconds=round(wc / WORDS_PER_SECOND, 1),
+                        try:
+                            result = await _call_llm_for_section(
+                                client, section_text, all_known_speakers,
+                                context, model, base_url, api_key
                             )
-                            db.add(chunk)
-                            chunk_global_index += 1
 
-                        section.status = "segmented"
-                        db.commit()
+                            for speaker in result.get("detectedSpeakers", []):
+                                if speaker and speaker not in all_known_speakers:
+                                    all_known_speakers.append(speaker)
 
-                        result_sections = _split_section_by_chunk_count(db, section)
-                        all_chapter_sections.extend(result_sections)
+                            for seg in result.get("segments", []):
+                                seg_text = seg.get("text", "")
+                                seg_type = seg.get("type", "narration")
+                                seg_speaker = seg.get("speaker")
+                                emotion = seg.get("emotion", seg.get("sentiment", "neutral"))
+                                if emotion not in CANONICAL_EMOTIONS:
+                                    emotion = "neutral"
 
-                    except Exception as e:
-                        logger.error(f"Failed to segment section {sec_idx} of chapter {chapter.chapter_index}: {e}")
-                        section.status = "failed"
-                        section.error_message = str(e)
-                        db.commit()
-                        all_chapter_sections.append(section)
+                                sub_texts = _rechunk_segment(seg_text)
 
-                _reindex_sections(db, chapter.id)
+                                for st in sub_texts:
+                                    wc = len(st.split())
+                                    chunk = ProjectChunk(
+                                        id=str(uuid.uuid4()),
+                                        section_id=section.id,
+                                        chunk_index=chunk_global_index,
+                                        text=st,
+                                        segment_type=seg_type,
+                                        speaker=seg_speaker,
+                                        emotion=emotion,
+                                        word_count=wc,
+                                        approx_duration_seconds=round(wc / WORDS_PER_SECOND, 1),
+                                    )
+                                    db.add(chunk)
+                                    chunk_global_index += 1
 
-                if use_llm:
+                            context = section_text[-500:] if len(section_text) > 500 else section_text
+
+                            section.status = "segmented"
+                            db.commit()
+
+                            result_sections = _split_section_by_chunk_count(db, section)
+                            all_chapter_sections.extend(result_sections)
+
+                        except Exception as e:
+                            logger.error(f"Failed to segment section {sec_idx} of chapter {chapter.chapter_index}: {e}")
+                            section.status = "failed"
+                            section.error_message = str(e)
+                            db.commit()
+                            all_chapter_sections.append(section)
+
+                    _reindex_sections(db, chapter.id)
+
                     try:
-                        _generate_section_titles(db, chapter.id)
+                        _generate_section_titles(db, chapter.id, model=model)
                     except Exception as e:
                         logger.warning(f"Section title generation failed for chapter {chapter.chapter_index}: {e}")
 
-                if all_known_speakers:
-                    chapter.speakers_json = json.dumps(all_known_speakers)
+                    if all_known_speakers:
+                        chapter.speakers_json = json.dumps(all_known_speakers)
 
-                chapter.status = "segmented"
-                db.commit()
+                    chapter.status = "segmented"
+                    db.commit()
 
-            except Exception as e:
-                logger.error(f"Failed to segment chapter {chapter.chapter_index}: {e}")
-                chapter.status = "failed"
-                chapter.error_message = str(e)
-                db.commit()
+                except Exception as e:
+                    logger.error(f"Failed to segment chapter {chapter.chapter_index}: {e}")
+                    chapter.status = "failed"
+                    chapter.error_message = str(e)
+                    db.commit()
 
         failed_chapters = db.query(ProjectChapter).filter(
             ProjectChapter.project_id == project_id,

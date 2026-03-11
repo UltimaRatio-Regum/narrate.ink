@@ -1,6 +1,6 @@
 import { useState, useRef } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, Upload, FileText, X } from "lucide-react";
+import { Plus, Upload, FileText, X, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,7 +14,15 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import { LLM_MODELS, DEFAULT_MODEL } from "@/lib/models";
 import type { ProjectData } from "@shared/schema";
 
 interface CreateProjectDialogProps {
@@ -29,6 +37,7 @@ export function CreateProjectDialog({ onProjectCreated }: CreateProjectDialogPro
   const [text, setText] = useState("");
   const [inputMode, setInputMode] = useState<"text" | "epub">("text");
   const [epubFile, setEpubFile] = useState<File | null>(null);
+  const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL.id);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const createMutation = useMutation({
@@ -56,6 +65,8 @@ export function CreateProjectDialog({ onProjectCreated }: CreateProjectDialogPro
       try {
         const segRes = await fetch(`/api/projects/${project.id}/segment`, {
           method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ model: selectedModel }),
           credentials: "include",
         });
         if (!segRes.ok) {
@@ -71,6 +82,7 @@ export function CreateProjectDialog({ onProjectCreated }: CreateProjectDialogPro
       setTitle("");
       setText("");
       setEpubFile(null);
+      setSelectedModel(DEFAULT_MODEL.id);
       onProjectCreated(project);
     },
     onError: (error: Error) => {
@@ -188,6 +200,25 @@ export function CreateProjectDialog({ onProjectCreated }: CreateProjectDialogPro
               />
             </div>
           )}
+
+          <div className="space-y-2">
+            <Label>Analysis Model</Label>
+            <Select value={selectedModel} onValueChange={setSelectedModel}>
+              <SelectTrigger data-testid="select-model">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {LLM_MODELS.map((m) => (
+                  <SelectItem key={m.id} value={m.id} data-testid={`model-option-${m.id}`}>
+                    {m.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              LLM used for text chunking, speaker detection, and emotion analysis
+            </p>
+          </div>
         </div>
 
         <DialogFooter>

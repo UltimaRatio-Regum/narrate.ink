@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Wand2, Save, Book, Layers, FileText, Type, Download, Upload, X, Image, Users, AlertTriangle } from "lucide-react";
+import { Wand2, Save, Book, Layers, FileText, Type, Download, Upload, X, Image, Users, AlertTriangle, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,6 +20,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { ProjectAudioList } from "@/components/ProjectAudioList";
 import { SpeakerInspectorDialog } from "@/components/SpeakerInspectorDialog";
 import { TTS_ENGINES } from "@/lib/tts-engines";
+import { LLM_MODELS, DEFAULT_MODEL } from "@/lib/models";
 import type { TreeSelection } from "@/components/ProjectTree";
 import type {
   ProjectData,
@@ -226,6 +227,7 @@ function ProjectSettingsPanel({
   const [metaDescription, setMetaDescription] = useState(project.metaDescription || "");
   const [isExporting, setIsExporting] = useState(false);
   const [inspectedSpeaker, setInspectedSpeaker] = useState<string | null>(null);
+  const [resegmentModel, setResegmentModel] = useState(DEFAULT_MODEL.id);
 
   const allDetectedSpeakers = useMemo(() => {
     const speakers = new Set<string>();
@@ -290,6 +292,7 @@ function ProjectSettingsPanel({
     setMetaYear(project.metaYear || "");
     setMetaDescription(project.metaDescription || "");
     setSpeakerConfigs(initSpeakerConfigs());
+    setResegmentModel(DEFAULT_MODEL.id);
   }, [project.id]);
 
   useEffect(() => {
@@ -718,6 +721,58 @@ function ProjectSettingsPanel({
           </div>
         </div>
       </div>
+
+      <Separator />
+
+      <div className="space-y-3">
+        <h3 className="text-sm font-semibold">Re-segment Project</h3>
+        <p className="text-xs text-muted-foreground">
+          Re-analyze the text with a different LLM model. This will replace all existing chapters, sections, and chunks.
+        </p>
+        <div className="flex items-end gap-2">
+          <div className="flex-1 space-y-1">
+            <Label className="text-xs">Analysis Model</Label>
+            <Select value={resegmentModel} onValueChange={setResegmentModel}>
+              <SelectTrigger data-testid="select-resegment-model" className="h-9">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {LLM_MODELS.map((m) => (
+                  <SelectItem key={m.id} value={m.id}>
+                    {m.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={async () => {
+              try {
+                const res = await fetch(`/api/projects/${project.id}/segment`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ model: resegmentModel }),
+                  credentials: "include",
+                });
+                if (!res.ok) throw new Error(await res.text());
+                toast({ title: "Re-segmentation started", description: "Running in the background." });
+                onRefresh();
+              } catch (err: any) {
+                toast({ title: "Re-segmentation failed", description: err.message, variant: "destructive" });
+              }
+            }}
+            disabled={project.status === "segmenting"}
+            data-testid="button-resegment"
+          >
+            <RefreshCw className="h-3.5 w-3.5 mr-1" />
+            {project.status === "segmenting" ? "Segmenting..." : "Re-segment"}
+          </Button>
+        </div>
+      </div>
+
+      <Separator />
 
       <div className="flex gap-2">
         <Button
