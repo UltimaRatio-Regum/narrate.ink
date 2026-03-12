@@ -81,7 +81,7 @@ function getMostLikelySpeaker(candidates: SpeakerCandidates | undefined): string
 }
 
 const TARGET_CHUNK_WORDS = 25;
-const MAX_CHUNK_WORDS = 30;
+const MAX_CHUNK_WORDS = 40;
 
 function rechunkSegmentText(text: string): string[] {
   const words = text.split(/\s+/).filter(w => w.length > 0);
@@ -322,8 +322,9 @@ SEGMENTATION RULES:
 1. QUOTE BOUNDARIES: Quoted dialogue (straight " or curly \u201c\u201d) must always be its own segment, separate from surrounding narration. Never mix dialogue and narration in one segment.
 2. NATURAL PAUSES FIRST: Always prefer breaking at natural pause points over hitting a word-count target. A 5-word segment that ends at a sentence boundary is better than a 25-word segment that breaks mid-clause.
 3. SOFT SIZE GUIDE: Target ~25 words per segment. Segments under 10 words are fine if they are complete sentences or short dialogue. Segments up to ~40 words are acceptable if breaking earlier would split a natural phrase. Avoid segments over 40 words.
-4. TRANSITIONS: ALWAYS split at transitions between speaking and narrating.
-5. TYPE: Each segment is either "spoken" (dialogue in quotes) or "narration" (everything else).
+4. KEEP SENTENCES WHOLE: Never split a single sentence that is under 40 words. Keep it as one segment even if it exceeds the ~25 word target. The soft max exists specifically to avoid breaking sentences. For example, a 36-word sentence must stay as one segment — do NOT split it into a 22-word fragment and a 14-word fragment.
+5. TRANSITIONS: ALWAYS split at transitions between speaking and narrating.
+6. TYPE: Each segment is either "spoken" (dialogue in quotes) or "narration" (everything else).
 
 SPEAKER IDENTIFICATION — CRITICAL:
 You MUST identify a speaker for EVERY spoken segment. Never leave speaker_candidates empty or omit it. Use ALL available evidence to determine who is speaking:

@@ -2204,6 +2204,52 @@ async def update_chunk(project_id: str, chunk_id: str, request: UpdateChunkReque
         db.close()
 
 
+WORDS_PER_SECOND = 2.5
+
+@app.post("/projects/{project_id}/chunks/{chunk_id}/combine-with-previous")
+async def combine_chunk_with_previous(project_id: str, chunk_id: str):
+    db = get_db_session()
+    try:
+        chunk = db.query(ProjectChunk).join(ProjectSection).join(ProjectChapter).filter(
+            ProjectChunk.id == chunk_id,
+            ProjectChapter.project_id == project_id
+        ).first()
+        if not chunk:
+            raise HTTPException(status_code=404, detail="Chunk not found")
+
+        section_chunks = db.query(ProjectChunk).filter(
+            ProjectChunk.section_id == chunk.section_id
+        ).order_by(ProjectChunk.chunk_index).all()
+
+        prev_chunk = None
+        for c in section_chunks:
+            if c.id == chunk_id:
+                break
+            prev_chunk = c
+
+        if not prev_chunk:
+            raise HTTPException(status_code=400, detail="No previous chunk to combine with (this is the first chunk)")
+
+        prev_chunk.text = prev_chunk.text.rstrip() + " " + chunk.text.lstrip()
+        prev_chunk.word_count = len(prev_chunk.text.split())
+        prev_chunk.approx_duration_seconds = round(prev_chunk.word_count / WORDS_PER_SECOND, 1)
+        prev_chunk.updated_at = datetime.utcnow()
+
+        db.delete(chunk)
+        db.flush()
+
+        remaining = db.query(ProjectChunk).filter(
+            ProjectChunk.section_id == prev_chunk.section_id
+        ).order_by(ProjectChunk.chunk_index).all()
+        for idx, c in enumerate(remaining):
+            c.chunk_index = idx
+
+        db.commit()
+        return {"success": True, "combinedChunkId": prev_chunk.id}
+    finally:
+        db.close()
+
+
 class BatchChunkUpdate(BaseModel):
     chunkId: str
     speakerOverride: Optional[str] = None

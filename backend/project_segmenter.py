@@ -78,7 +78,7 @@ def split_into_sections(raw_text: str, word_limit: int = SECTION_WORD_LIMIT) -> 
     return sections
 
 
-def _rechunk_segment(text: str, max_words: int = 30) -> list[str]:
+def _rechunk_segment(text: str, max_words: int = 40) -> list[str]:
     words = text.split()
     if len(words) <= max_words:
         return [text]
@@ -254,10 +254,11 @@ CHUNKING RULES:
 1. QUOTE BOUNDARIES: Quoted dialogue must always be its own chunk, separate from surrounding narration. Never mix dialogue and narration in one chunk.
 2. NATURAL PAUSES FIRST: Always prefer breaking at natural pause points over hitting a word-count target. A 5-word chunk that ends at a sentence boundary is better than a 25-word chunk that breaks mid-clause.
 3. SOFT SIZE GUIDE: Target ~25 words per chunk. Chunks under 10 words are fine if they are complete sentences or short dialogue. Chunks up to ~40 words are acceptable if breaking earlier would split a natural phrase. Avoid chunks over 40 words.
-4. TYPE: Each chunk is either "narration" or "dialogue", never both.
-5. SPEAKER: For dialogue, identify the speaker by name from context. For narration, speaker is null.
-6. EMOTION: Assign exactly one emotion per chunk from: {emotions_str}
-7. PRESERVE TEXT: Copy the original text exactly — do not paraphrase, summarize, or omit any words.
+4. KEEP SENTENCES WHOLE: Never split a single sentence that is under 40 words. Keep it as one chunk even if it exceeds the ~25 word target. The soft max exists specifically to avoid breaking sentences. For example, a 36-word sentence must stay as one chunk — do NOT split it into a 22-word fragment and a 14-word fragment.
+5. TYPE: Each chunk is either "narration" or "dialogue", never both.
+6. SPEAKER: For dialogue, identify the speaker by name from context. For narration, speaker is null.
+7. EMOTION: Assign exactly one emotion per chunk from: {emotions_str}
+8. PRESERVE TEXT: Copy the original text exactly — do not paraphrase, summarize, or omit any words.
 {speaker_hint}
 Previous context: {context[:500] if context else 'Start of text'}
 
@@ -495,7 +496,6 @@ async def _run_segmentation(project_id: str, model: str):
                     db.commit()
 
                     section_texts = split_into_sections(chapter.raw_text)
-                    chunk_global_index = 0
 
                     all_chapter_sections = []
                     context = ""
@@ -509,6 +509,8 @@ async def _run_segmentation(project_id: str, model: str):
                         )
                         db.add(section)
                         db.commit()
+
+                        chunk_section_index = 0
 
                         try:
                             result = await _call_llm_for_section(
@@ -535,7 +537,7 @@ async def _run_segmentation(project_id: str, model: str):
                                     chunk = ProjectChunk(
                                         id=str(uuid.uuid4()),
                                         section_id=section.id,
-                                        chunk_index=chunk_global_index,
+                                        chunk_index=chunk_section_index,
                                         text=st,
                                         segment_type=seg_type,
                                         speaker=seg_speaker,
@@ -544,7 +546,7 @@ async def _run_segmentation(project_id: str, model: str):
                                         approx_duration_seconds=round(wc / WORDS_PER_SECOND, 1),
                                     )
                                     db.add(chunk)
-                                    chunk_global_index += 1
+                                    chunk_section_index += 1
 
                             context = section_text[-500:] if len(section_text) > 500 else section_text
 

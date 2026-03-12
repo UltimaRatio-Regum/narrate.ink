@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Wand2, Save, Book, Layers, FileText, Type, Download, Upload, X, Image, Users, AlertTriangle, RefreshCw } from "lucide-react";
+import { Wand2, Save, Book, Layers, FileText, Type, Download, Upload, X, Image, Users, AlertTriangle, RefreshCw, Merge } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -982,6 +982,21 @@ function ChunkDetailPanel({
     },
   });
 
+  const combineMutation = useMutation({
+    mutationFn: async () => {
+      await apiRequest("POST", `/api/projects/${project.id}/chunks/${chunk.id}/combine-with-previous`);
+    },
+    onSuccess: () => {
+      toast({ title: "Chunks combined successfully" });
+      onRefresh();
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to combine", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const isFirstChunk = chunk.chunkIndex === 0;
+
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-2">
@@ -1055,6 +1070,19 @@ function ChunkDetailPanel({
           <Save className="h-4 w-4 mr-2" />
           {saveMutation.isPending ? "Saving..." : "Save Overrides"}
         </Button>
+
+        {!isFirstChunk && (
+          <Button
+            onClick={() => combineMutation.mutate()}
+            disabled={combineMutation.isPending}
+            size="sm"
+            variant="outline"
+            data-testid="button-combine-chunk"
+          >
+            <Merge className="h-4 w-4 mr-2" />
+            {combineMutation.isPending ? "Combining..." : "Combine with Previous Chunk"}
+          </Button>
+        )}
       </div>
     </div>
   );
