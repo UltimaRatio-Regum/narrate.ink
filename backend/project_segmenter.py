@@ -222,15 +222,38 @@ Return ONLY valid JSON, no markdown fences."""
     else:
         prompt = f"""You are chunking text for a text-to-speech audiobook engine. Each chunk will be sent to a TTS engine as a separate audio clip, so chunk size directly controls audio segment length.
 
-TARGET: Each chunk must be 20-30 words (8-12 seconds of speech at 2.5 words/second). This is critical — TTS engines produce poor quality on long inputs.
+TARGET: Aim for chunks of roughly 25 words (~10 seconds of speech). Chunks may be shorter or up to ~40 words when needed. The most important rule is that every chunk must break at a NATURAL PAUSE POINT — a place where a human reader would briefly pause.
 
-CHUNKING RULES (in priority order):
+NATURAL PAUSE PRIORITY — THIS IS THE MOST IMPORTANT RULE:
+Always break chunks at natural speech boundaries. A shorter or longer chunk that ends at a natural pause is ALWAYS better than one that hits a word-count target but breaks mid-thought. Do NOT greedily pack words up to a limit — look ahead and choose the break point that sounds most natural when read aloud.
+
+Preferred break points (best to worst):
+1. Sentence boundaries (periods, question marks, exclamation marks)
+2. Semicolons, colons, or em-dashes
+3. Before conjunctions (and, but, or, so, yet, because, though, while)
+4. Before prepositional phrases (in, on, at, with, from, to, through, across, etc.)
+5. Commas
+
+BAD vs GOOD example:
+Given: "This is a short sentence. I'm going to ramble on and on noticing that this is a longer sentence and make sure that the sentence gets broken up at a bad spot instead of a more natural one."
+
+BAD (greedy fill, breaks mid-phrase):
+- Chunk 1: "This is a short sentence. I'm going to ramble on and on noticing that this is a longer sentence and make sure that the sentence gets broken up at a bad"
+- Chunk 2: "spot instead of a more natural one."
+
+GOOD (respects sentence boundary, even though Chunk 1 is short):
+- Chunk 1: "This is a short sentence."
+- Chunk 2: "I'm going to ramble on and on noticing that this is a longer sentence and make sure that the sentence gets broken up at a bad spot instead of a more natural one."
+
+ALSO GOOD (splits long sentence at a natural clause boundary):
+- Chunk 1: "This is a short sentence."
+- Chunk 2: "I'm going to ramble on and on noticing that this is a longer sentence"
+- Chunk 3: "and make sure that the sentence gets broken up at a bad spot instead of a more natural one."
+
+CHUNKING RULES:
 1. QUOTE BOUNDARIES: Quoted dialogue must always be its own chunk, separate from surrounding narration. Never mix dialogue and narration in one chunk.
-2. SIZE LIMIT: No chunk may exceed 30 words. If a sentence or paragraph is longer than 30 words, you MUST split it at a natural pause point:
-   - First preference: sentence boundaries (periods, question marks, exclamation marks)
-   - Second preference: semicolons, colons, or em-dashes
-   - Third preference: commas or conjunctions (and, but, or, so, yet, because, though, while)
-3. MINIMUM SIZE: Avoid chunks under 10 words unless they are short dialogue (e.g. "Yes," he said).
+2. NATURAL PAUSES FIRST: Always prefer breaking at natural pause points over hitting a word-count target. A 5-word chunk that ends at a sentence boundary is better than a 25-word chunk that breaks mid-clause.
+3. SOFT SIZE GUIDE: Target ~25 words per chunk. Chunks under 10 words are fine if they are complete sentences or short dialogue. Chunks up to ~40 words are acceptable if breaking earlier would split a natural phrase. Avoid chunks over 45 words.
 4. TYPE: Each chunk is either "narration" or "dialogue", never both.
 5. SPEAKER: For dialogue, identify the speaker by name from context. For narration, speaker is null.
 6. EMOTION: Assign exactly one emotion per chunk from: {emotions_str}

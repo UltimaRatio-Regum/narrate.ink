@@ -290,15 +290,38 @@ const VALID_EMOTIONS = [
 
 const DEFAULT_SYSTEM_PROMPT = `You are chunking text for a text-to-speech audiobook engine. Each segment will be sent to a TTS engine as a separate audio clip, so segment size directly controls audio quality.
 
-TARGET: Each segment must be 20-30 words (8-12 seconds of speech at 2.5 words/second). This is critical — TTS engines produce poor quality on long inputs.
+TARGET: Aim for segments of roughly 25 words (~10 seconds of speech). Segments may be shorter or up to ~40 words when needed. The most important rule is that every segment must break at a NATURAL PAUSE POINT — a place where a human reader would briefly pause.
 
-SEGMENTATION RULES (in priority order):
+NATURAL PAUSE PRIORITY — THIS IS THE MOST IMPORTANT RULE:
+Always break segments at natural speech boundaries. A shorter or longer segment that ends at a natural pause is ALWAYS better than one that hits a word-count target but breaks mid-thought. Do NOT greedily pack words up to a limit — look ahead and choose the break point that sounds most natural when read aloud.
+
+Preferred break points (best to worst):
+1. Sentence boundaries (periods, question marks, exclamation marks)
+2. Semicolons, colons, or em-dashes
+3. Before conjunctions (and, but, or, so, yet, because, though, while)
+4. Before prepositional phrases (in, on, at, with, from, to, through, across, etc.)
+5. Commas
+
+BAD vs GOOD example:
+Given: "This is a short sentence. I'm going to ramble on and on noticing that this is a longer sentence and make sure that the sentence gets broken up at a bad spot instead of a more natural one."
+
+BAD (greedy fill, breaks mid-phrase):
+- Segment 1: "This is a short sentence. I'm going to ramble on and on noticing that this is a longer sentence and make sure that the sentence gets broken up at a bad"
+- Segment 2: "spot instead of a more natural one."
+
+GOOD (respects sentence boundary, even though Segment 1 is short):
+- Segment 1: "This is a short sentence."
+- Segment 2: "I'm going to ramble on and on noticing that this is a longer sentence and make sure that the sentence gets broken up at a bad spot instead of a more natural one."
+
+ALSO GOOD (splits long sentence at a natural clause boundary):
+- Segment 1: "This is a short sentence."
+- Segment 2: "I'm going to ramble on and on noticing that this is a longer sentence"
+- Segment 3: "and make sure that the sentence gets broken up at a bad spot instead of a more natural one."
+
+SEGMENTATION RULES:
 1. QUOTE BOUNDARIES: Quoted dialogue (straight " or curly \u201c\u201d) must always be its own segment, separate from surrounding narration. Never mix dialogue and narration in one segment.
-2. SIZE LIMIT: No segment may exceed 30 words. If a sentence or paragraph is longer than 30 words, you MUST split it at a natural pause point:
-   - First preference: sentence boundaries (periods, question marks, exclamation marks)
-   - Second preference: semicolons, colons, or em-dashes
-   - Third preference: commas or conjunctions (and, but, or, so, yet, because, though, while)
-3. MINIMUM SIZE: Avoid segments under 10 words unless they are short dialogue (e.g. "Yes," he said).
+2. NATURAL PAUSES FIRST: Always prefer breaking at natural pause points over hitting a word-count target. A 5-word segment that ends at a sentence boundary is better than a 25-word segment that breaks mid-clause.
+3. SOFT SIZE GUIDE: Target ~25 words per segment. Segments under 10 words are fine if they are complete sentences or short dialogue. Segments up to ~40 words are acceptable if breaking earlier would split a natural phrase. Avoid segments over 45 words.
 4. TRANSITIONS: ALWAYS split at transitions between speaking and narrating.
 5. TYPE: Each segment is either "spoken" (dialogue in quotes) or "narration" (everything else).
 
@@ -360,7 +383,7 @@ Return JSON in this exact format:
         },
         {
           "type": "narration",
-          "text": "The narration text (max 30 words)",
+          "text": "The narration text",
           "emotion": {"label": "neutral", "score": 0.7}
         }
       ]
@@ -445,8 +468,8 @@ async function parseWithConversation(
     const isFirst = i === 0;
     
     const userPrompt = isFirst
-      ? `Parse the following text into chunks and segments. Each segment MUST be 20-30 words max. Start chunk IDs at ${nextChunkId}.\n\nHere is the text:\n\n${batch}`
-      : `Continue parsing the next section. Each segment MUST be 20-30 words max. Continue chunk IDs from ${nextChunkId}. Use the same characters identified so far.\n\nHere is the text:\n\n${batch}`;
+      ? `Parse the following text into chunks and segments. Target ~25 words per segment, but always break at natural pause points — never mid-phrase. Start chunk IDs at ${nextChunkId}.\n\nHere is the text:\n\n${batch}`
+      : `Continue parsing the next section. Target ~25 words per segment, but always break at natural pause points — never mid-phrase. Continue chunk IDs from ${nextChunkId}. Use the same characters identified so far.\n\nHere is the text:\n\n${batch}`;
     
     messages.push({ role: "user", content: userPrompt });
     
@@ -548,8 +571,8 @@ export async function* parseTextWithLLMStreaming(
     const isFirst = i === 0;
     
     const userPrompt = isFirst
-      ? `Parse the following text into chunks and segments. Each segment MUST be 20-30 words max. Start chunk IDs at ${nextChunkId}.\n\nHere is the text:\n\n${batch}`
-      : `Continue parsing the next section. Each segment MUST be 20-30 words max. Continue chunk IDs from ${nextChunkId}. Use the same characters identified so far.\n\nHere is the text:\n\n${batch}`;
+      ? `Parse the following text into chunks and segments. Target ~25 words per segment, but always break at natural pause points — never mid-phrase. Start chunk IDs at ${nextChunkId}.\n\nHere is the text:\n\n${batch}`
+      : `Continue parsing the next section. Target ~25 words per segment, but always break at natural pause points — never mid-phrase. Continue chunk IDs from ${nextChunkId}. Use the same characters identified so far.\n\nHere is the text:\n\n${batch}`;
     
     messages.push({ role: "user", content: userPrompt });
     
