@@ -363,6 +363,8 @@ export const updateProjectSettingsSchema = z.object({
   exaggeration: z.number().min(0).max(1).optional(),
   pauseDuration: z.number().min(0).max(3000).optional(),
   speakersJson: z.string().nullable().optional(),
+  narratorEmotion: narratorEmotionSchema.optional(),
+  dialogueEmotionMode: dialogueEmotionModeSchema.optional(),
   outputFormat: outputFormatSchema.optional(),
   metaAuthor: z.string().nullable().optional(),
   metaNarrator: z.string().nullable().optional(),
