@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Wand2, Save, Book, Layers, FileText, Type, Download, Upload, X, Image, Users, AlertTriangle, RefreshCw, Merge } from "lucide-react";
+import { Wand2, Save, Book, Layers, FileText, Type, Download, Upload, X, Image, Users, AlertTriangle, RefreshCw, Merge, CheckSquare } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -49,6 +50,7 @@ interface ProjectDetailPanelProps {
 export function ProjectDetailPanel({ selection, project, onRefresh }: ProjectDetailPanelProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const [onlyMissing, setOnlyMissing] = useState(false);
 
   const { data: voiceSamples = [] } = useQuery<VoiceSample[]>({
     queryKey: ["/api/voices"],
@@ -60,6 +62,10 @@ export function ProjectDetailPanel({ selection, project, onRefresh }: ProjectDet
 
   const { data: registeredEngines = [] } = useQuery<any[]>({
     queryKey: ["/api/tts-engines"],
+  });
+
+  const { data: audioStats = {} } = useQuery<Record<string, { total: number; withAudio: number }>>({
+    queryKey: ["/api/projects", project.id, "audio-stats"],
   });
 
   const allEngines = [
@@ -127,21 +133,37 @@ export function ProjectDetailPanel({ selection, project, onRefresh }: ProjectDet
       const res = await apiRequest("POST", `/api/projects/${project.id}/generate`, {
         scopeType: selection.type,
         scopeId,
+        onlyMissing,
       });
       return res.json();
     },
     onSuccess: (data) => {
+      if (data.message) {
+        toast({ title: "Nothing to generate", description: data.message });
+        return;
+      }
       const jobCount = data.totalJobs || 1;
       const desc = jobCount > 1
         ? `${jobCount} section jobs created with ${data.totalSegments} total segments. Check the Jobs tab for progress.`
         : `Job created with ${data.totalSegments} segments. Check the Jobs tab for progress.`;
       toast({ title: "Generation started", description: desc });
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", project.id, "audio-stats"] });
       onRefresh();
     },
     onError: (error: Error) => {
       toast({ title: "Generation failed", description: error.message, variant: "destructive" });
     },
   });
+
+  const currentScopeId = selection.type === "project" ? project.id : selection.id;
+  const currentStats = audioStats[currentScopeId];
+  const hasAnyAudio = currentStats && currentStats.withAudio > 0;
+
+  const handleDownload = () => {
+    const scope = selection.type === "project" ? "project" : selection.type;
+    const scopeId = selection.type === "project" ? "" : selection.id;
+    window.open(`/api/projects/${project.id}/download?scope=${scope}&scopeId=${scopeId}`, "_blank");
+  };
 
   return (
     <div className="space-y-6" data-testid="project-detail-panel">
@@ -182,16 +204,57 @@ export function ProjectDetailPanel({ selection, project, onRefresh }: ProjectDet
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-semibold">Audio Generation</h3>
-          <Button
-            size="sm"
-            onClick={() => generateMutation.mutate()}
-            disabled={generateMutation.isPending || project.status === "segmenting"}
-            data-testid="button-generate-audio"
-          >
-            <Wand2 className="h-3.5 w-3.5 mr-1" />
-            {generateMutation.isPending ? "Starting..." : `Generate ${selection.type}`}
-          </Button>
+          <div className="flex items-center gap-2">
+            {hasAnyAudio && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleDownload}
+                data-testid="button-download-audio"
+              >
+                <Download className="h-3.5 w-3.5 mr-1" />
+                Download {selection.type}
+                {currentStats && (
+                  <span className="ml-1 text-xs text-muted-foreground">
+                    ({currentStats.withAudio}/{currentStats.total})
+                  </span>
+                )}
+              </Button>
+            )}
+            <Button
+              size="sm"
+              onClick={() => generateMutation.mutate()}
+              disabled={generateMutation.isPending || project.status === "segmenting"}
+              data-testid="button-generate-audio"
+            >
+              <Wand2 className="h-3.5 w-3.5 mr-1" />
+              {generateMutation.isPending ? "Starting..." : `Generate ${selection.type}`}
+            </Button>
+          </div>
         </div>
+
+        {selection.type !== "chunk" && (
+          <div className="flex items-center gap-2">
+            <Checkbox
+              id="only-missing"
+              checked={onlyMissing}
+              onCheckedChange={(checked) => setOnlyMissing(checked === true)}
+              data-testid="checkbox-only-missing"
+            />
+            <label
+              htmlFor="only-missing"
+              className="text-xs text-muted-foreground cursor-pointer select-none"
+            >
+              Only generate missing segments
+              {currentStats && currentStats.withAudio > 0 && (
+                <span className="ml-1">
+                  ({currentStats.total - currentStats.withAudio} remaining)
+                </span>
+              )}
+            </label>
+          </div>
+        )}
+
         <ProjectAudioList audioFiles={audioFiles} projectId={project.id} />
       </div>
     </div>

@@ -1818,6 +1818,7 @@ class UpdateChunkRequest(BaseModel):
 class GenerateProjectAudioRequest(BaseModel):
     scopeType: str
     scopeId: str
+    onlyMissing: Optional[bool] = False
 
 
 def _serialize_project_list(project: Project) -> dict:
@@ -2437,6 +2438,12 @@ async def generate_project_audio(project_id: str, request: GenerateProjectAudioR
             ).order_by(ProjectChunk.chunk_index).all()
             if not chunks:
                 raise HTTPException(status_code=400, detail="No chunks in section")
+
+            if request.onlyMissing:
+                chunks = _filter_missing_chunks(db, project_id, chunks)
+                if not chunks:
+                    return {"success": True, "message": "All chunks already have audio", "totalSegments": 0}
+
             segments = [_build_segment_data(c, chapter, tts_engine, narrator_voice_id, speakers) for c in chunks]
             section_label = section.title or f"Section {section.section_index + 1}"
             chapter_title = chapter.title or f"Chapter {chapter.chapter_index + 1}"
@@ -2506,6 +2513,16 @@ async def generate_project_audio(project_id: str, request: GenerateProjectAudioR
             total_segments = 0
 
             chapter_ids_in_group = list(set(ch.id for _, ch, _ in sections_to_process))
+
+            if request.onlyMissing:
+                filtered_sections = []
+                for sec, chap, chunks in sections_to_process:
+                    remaining = _filter_missing_chunks(db, project_id, chunks)
+                    if remaining:
+                        filtered_sections.append((sec, chap, remaining))
+                sections_to_process = filtered_sections
+                if not sections_to_process:
+                    return {"success": True, "message": "All chunks already have audio", "totalSegments": 0}
 
             for sec, chap, chunks in sections_to_process:
                 segments = [_build_segment_data(c, chap, tts_engine, narrator_voice_id, speakers) for c in chunks]
@@ -2655,6 +2672,162 @@ async def delete_cover_image(project_id: str):
         project.updated_at = datetime.utcnow()
         db.commit()
         return {"success": True}
+    finally:
+        db.close()
+
+
+def _filter_missing_chunks(db, project_id: str, chunks):
+    """Filter chunks to only those that don't have an existing audio file."""
+    chunk_ids = [c.id for c in chunks]
+    existing_audio = db.query(ProjectAudioFile.scope_id).filter(
+        ProjectAudioFile.project_id == project_id,
+        ProjectAudioFile.scope_type == "chunk",
+        ProjectAudioFile.scope_id.in_(chunk_ids),
+    ).all()
+    existing_ids = {row.scope_id for row in existing_audio}
+    return [c for c in chunks if c.id not in existing_ids]
+
+
+def _gather_chunk_audio_blobs(db, project_id: str, chunk_ids: list):
+    """Gather latest audio blobs for the given chunk IDs, in order. Returns (blobs, total_chunks)."""
+    blobs = []
+    for cid in chunk_ids:
+        af = db.query(ProjectAudioFile).filter(
+            ProjectAudioFile.project_id == project_id,
+            ProjectAudioFile.scope_type == "chunk",
+            ProjectAudioFile.scope_id == cid,
+        ).order_by(ProjectAudioFile.created_at.desc()).first()
+        if af and af.audio_data:
+            blobs.append(af.audio_data)
+    return blobs
+
+
+@app.get("/projects/{project_id}/download")
+async def download_project_audio(project_id: str, scope: str = "project", scopeId: str = ""):
+    from backend.job_runner import _concatenate_mp3_blobs
+
+    if scope not in ("section", "chapter", "project"):
+        raise HTTPException(status_code=400, detail="Invalid scope. Use: section, chapter, project")
+
+    db = get_db_session()
+    try:
+        project = db.query(Project).filter(Project.id == project_id).first()
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        pause_ms = int(project.pause_duration) if project.pause_duration else 500
+        chunk_ids = []
+        filename_label = project.title
+
+        if scope == "section":
+            section = db.query(ProjectSection).filter(ProjectSection.id == scopeId).first()
+            if not section:
+                raise HTTPException(status_code=404, detail="Section not found")
+            chapter = db.query(ProjectChapter).filter(ProjectChapter.id == section.chapter_id).first()
+            chunks = db.query(ProjectChunk).filter(
+                ProjectChunk.section_id == section.id
+            ).order_by(ProjectChunk.chunk_index).all()
+            chunk_ids = [c.id for c in chunks]
+            sec_label = section.title or f"Section {section.section_index + 1}"
+            ch_label = chapter.title or f"Chapter {chapter.chapter_index + 1}" if chapter else ""
+            filename_label = f"{project.title} - {ch_label} - {sec_label}"
+
+        elif scope == "chapter":
+            chapter = db.query(ProjectChapter).filter(
+                ProjectChapter.id == scopeId,
+                ProjectChapter.project_id == project_id
+            ).first()
+            if not chapter:
+                raise HTTPException(status_code=404, detail="Chapter not found")
+            sections = db.query(ProjectSection).filter(
+                ProjectSection.chapter_id == chapter.id
+            ).order_by(ProjectSection.section_index).all()
+            for sec in sections:
+                chunks = db.query(ProjectChunk).filter(
+                    ProjectChunk.section_id == sec.id
+                ).order_by(ProjectChunk.chunk_index).all()
+                chunk_ids.extend([c.id for c in chunks])
+            ch_label = chapter.title or f"Chapter {chapter.chapter_index + 1}"
+            filename_label = f"{project.title} - {ch_label}"
+
+        elif scope == "project":
+            chapters = db.query(ProjectChapter).filter(
+                ProjectChapter.project_id == project_id
+            ).order_by(ProjectChapter.chapter_index).all()
+            for ch in chapters:
+                sections = db.query(ProjectSection).filter(
+                    ProjectSection.chapter_id == ch.id
+                ).order_by(ProjectSection.section_index).all()
+                for sec in sections:
+                    chunks = db.query(ProjectChunk).filter(
+                        ProjectChunk.section_id == sec.id
+                    ).order_by(ProjectChunk.chunk_index).all()
+                    chunk_ids.extend([c.id for c in chunks])
+
+        blobs = _gather_chunk_audio_blobs(db, project_id, chunk_ids)
+        if not blobs:
+            raise HTTPException(status_code=400, detail="No audio generated yet for this scope.")
+
+        combined = _concatenate_mp3_blobs(blobs, pause_ms)
+        safe_name = "".join(c for c in filename_label if c.isalnum() or c in " _-").strip()
+
+        return Response(
+            content=combined,
+            media_type="audio/mpeg",
+            headers={"Content-Disposition": f'attachment; filename="{safe_name}.mp3"'},
+        )
+    finally:
+        db.close()
+
+
+@app.get("/projects/{project_id}/audio-stats")
+async def get_project_audio_stats(project_id: str):
+    """Get counts of chunks with audio at each scope level."""
+    db = get_db_session()
+    try:
+        project = db.query(Project).filter(Project.id == project_id).first()
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        all_audio_scope_ids = set(
+            row.scope_id for row in db.query(ProjectAudioFile.scope_id).filter(
+                ProjectAudioFile.project_id == project_id,
+                ProjectAudioFile.scope_type == "chunk",
+            ).all()
+        )
+
+        stats = {}
+        total_chunks = 0
+        total_with_audio = 0
+
+        chapters = db.query(ProjectChapter).filter(
+            ProjectChapter.project_id == project_id
+        ).order_by(ProjectChapter.chapter_index).all()
+
+        for ch in chapters:
+            ch_chunks = 0
+            ch_audio = 0
+            sections = db.query(ProjectSection).filter(
+                ProjectSection.chapter_id == ch.id
+            ).order_by(ProjectSection.section_index).all()
+
+            for sec in sections:
+                chunks = db.query(ProjectChunk).filter(
+                    ProjectChunk.section_id == sec.id
+                ).all()
+                sec_total = len(chunks)
+                sec_audio = sum(1 for c in chunks if c.id in all_audio_scope_ids)
+                stats[sec.id] = {"total": sec_total, "withAudio": sec_audio}
+                ch_chunks += sec_total
+                ch_audio += sec_audio
+
+            stats[ch.id] = {"total": ch_chunks, "withAudio": ch_audio}
+            total_chunks += ch_chunks
+            total_with_audio += ch_audio
+
+        stats[project_id] = {"total": total_chunks, "withAudio": total_with_audio}
+
+        return stats
     finally:
         db.close()
 
