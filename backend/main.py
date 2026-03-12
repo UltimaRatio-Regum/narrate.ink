@@ -2689,22 +2689,37 @@ def _filter_missing_chunks(db, project_id: str, chunks):
 
 
 def _gather_chunk_audio_blobs(db, project_id: str, chunk_ids: list):
-    """Gather latest audio blobs for the given chunk IDs, in order. Returns (blobs, total_chunks)."""
-    blobs = []
-    for cid in chunk_ids:
-        af = db.query(ProjectAudioFile).filter(
-            ProjectAudioFile.project_id == project_id,
-            ProjectAudioFile.scope_type == "chunk",
-            ProjectAudioFile.scope_id == cid,
-        ).order_by(ProjectAudioFile.created_at.desc()).first()
-        if af and af.audio_data:
-            blobs.append(af.audio_data)
-    return blobs
+    """Gather latest audio blobs for the given chunk IDs, in order."""
+    from sqlalchemy import func
+
+    if not chunk_ids:
+        return []
+
+    subq = db.query(
+        ProjectAudioFile.scope_id,
+        func.max(ProjectAudioFile.created_at).label("max_created")
+    ).filter(
+        ProjectAudioFile.project_id == project_id,
+        ProjectAudioFile.scope_type == "chunk",
+        ProjectAudioFile.scope_id.in_(chunk_ids),
+    ).group_by(ProjectAudioFile.scope_id).subquery()
+
+    latest = db.query(ProjectAudioFile).join(
+        subq,
+        (ProjectAudioFile.scope_id == subq.c.scope_id) &
+        (ProjectAudioFile.created_at == subq.c.max_created)
+    ).filter(
+        ProjectAudioFile.project_id == project_id,
+        ProjectAudioFile.scope_type == "chunk",
+    ).all()
+
+    audio_map = {af.scope_id: af.audio_data for af in latest if af.audio_data}
+    return [audio_map[cid] for cid in chunk_ids if cid in audio_map]
 
 
 @app.get("/projects/{project_id}/download")
 async def download_project_audio(project_id: str, scope: str = "project", scopeId: str = ""):
-    from backend.job_runner import _concatenate_mp3_blobs
+    from job_runner import _concatenate_mp3_blobs
 
     if scope not in ("section", "chapter", "project"):
         raise HTTPException(status_code=400, detail="Invalid scope. Use: section, chapter, project")
@@ -2803,28 +2818,41 @@ async def get_project_audio_stats(project_id: str):
         total_chunks = 0
         total_with_audio = 0
 
-        chapters = db.query(ProjectChapter).filter(
+        all_chunks = db.query(
+            ProjectChunk.id, ProjectChunk.section_id
+        ).join(ProjectSection).join(ProjectChapter).filter(
             ProjectChapter.project_id == project_id
-        ).order_by(ProjectChapter.chapter_index).all()
+        ).all()
 
-        for ch in chapters:
+        section_chunks = {}
+        for cid, sid in all_chunks:
+            section_chunks.setdefault(sid, []).append(cid)
+
+        sections = db.query(
+            ProjectSection.id, ProjectSection.chapter_id
+        ).join(ProjectChapter).filter(
+            ProjectChapter.project_id == project_id
+        ).all()
+
+        chapter_sections = {}
+        for sid, chid in sections:
+            chapter_sections.setdefault(chid, []).append(sid)
+
+        chapters = db.query(ProjectChapter.id).filter(
+            ProjectChapter.project_id == project_id
+        ).all()
+
+        for (ch_id,) in chapters:
             ch_chunks = 0
             ch_audio = 0
-            sections = db.query(ProjectSection).filter(
-                ProjectSection.chapter_id == ch.id
-            ).order_by(ProjectSection.section_index).all()
-
-            for sec in sections:
-                chunks = db.query(ProjectChunk).filter(
-                    ProjectChunk.section_id == sec.id
-                ).all()
-                sec_total = len(chunks)
-                sec_audio = sum(1 for c in chunks if c.id in all_audio_scope_ids)
-                stats[sec.id] = {"total": sec_total, "withAudio": sec_audio}
+            for sec_id in chapter_sections.get(ch_id, []):
+                chunk_ids = section_chunks.get(sec_id, [])
+                sec_total = len(chunk_ids)
+                sec_audio = sum(1 for c in chunk_ids if c in all_audio_scope_ids)
+                stats[sec_id] = {"total": sec_total, "withAudio": sec_audio}
                 ch_chunks += sec_total
                 ch_audio += sec_audio
-
-            stats[ch.id] = {"total": ch_chunks, "withAudio": ch_audio}
+            stats[ch_id] = {"total": ch_chunks, "withAudio": ch_audio}
             total_chunks += ch_chunks
             total_with_audio += ch_audio
 

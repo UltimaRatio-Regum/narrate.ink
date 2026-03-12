@@ -148,6 +148,7 @@ export function ProjectDetailPanel({ selection, project, onRefresh }: ProjectDet
         : `Job created with ${data.totalSegments} segments. Check the Jobs tab for progress.`;
       toast({ title: "Generation started", description: desc });
       queryClient.invalidateQueries({ queryKey: ["/api/projects", project.id, "audio-stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/jobs"] });
       onRefresh();
     },
     onError: (error: Error) => {
