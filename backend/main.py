@@ -2720,7 +2720,10 @@ async def download_project_audio(project_id: str, scope: str = "project", scopeI
         filename_label = project.title
 
         if scope == "section":
-            section = db.query(ProjectSection).filter(ProjectSection.id == scopeId).first()
+            section = db.query(ProjectSection).join(ProjectChapter).filter(
+                ProjectSection.id == scopeId,
+                ProjectChapter.project_id == project_id
+            ).first()
             if not section:
                 raise HTTPException(status_code=404, detail="Section not found")
             chapter = db.query(ProjectChapter).filter(ProjectChapter.id == section.chapter_id).first()
