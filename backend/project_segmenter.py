@@ -6,12 +6,11 @@ import os
 import asyncio
 import threading
 from typing import Optional, List
-from pathlib import Path
-
 import httpx
 
 from database import (
-    get_db_session, Project, ProjectChapter, ProjectSection, ProjectChunk
+    get_db_session, Project, ProjectChapter, ProjectSection, ProjectChunk,
+    AppSetting,
 )
 
 logger = logging.getLogger(__name__)
@@ -27,19 +26,21 @@ CANONICAL_EMOTIONS = [
     "excited", "calm", "anxious", "hopeful", "melancholy", "tender", "proud",
 ]
 
-PARSING_PROMPT_FILE = Path("parsing_prompt_settings.json")
+PARSING_PROMPT_SETTING_KEY = "parsing_prompt"
 
 
-def _load_custom_prompt() -> Optional[str]:
-    if PARSING_PROMPT_FILE.exists():
-        try:
-            with open(PARSING_PROMPT_FILE, "r") as f:
-                data = json.load(f)
-            if data.get("prompt"):
-                return data["prompt"]
-        except Exception as e:
-            logger.warning(f"Failed to load custom parsing prompt: {e}")
-    return None
+def _load_prompt() -> Optional[str]:
+    db = get_db_session()
+    try:
+        setting = db.query(AppSetting).filter(AppSetting.key == PARSING_PROMPT_SETTING_KEY).first()
+        if setting and setting.value:
+            return setting.value
+        return None
+    except Exception as e:
+        logger.warning(f"Failed to load parsing prompt from database: {e}")
+        return None
+    finally:
+        db.close()
 
 
 def split_into_sections(raw_text: str, word_limit: int = SECTION_WORD_LIMIT) -> list[str]:
@@ -99,6 +100,101 @@ def _rechunk_segment(text: str, max_words: int = 40) -> list[str]:
     if current:
         chunks.append(" ".join(current))
     return chunks
+
+
+PASS2_WORD_THRESHOLD = 40
+
+PASS2_SPLIT_PROMPT = """You are splitting a single long sentence into 2-3 shorter segments for a text-to-speech engine.
+
+Split this text at natural conjunction or preposition boundaries (and, but, or, so, yet, because, though, while, in, on, at, with, from, to, through, across, before, after, etc.). Each sub-segment should read naturally when spoken aloud.
+
+RULES:
+- Split into 2-3 segments only
+- Split ONLY at conjunction or preposition boundaries
+- Preserve the EXACT original text — do not paraphrase, summarize, or omit words
+- Every word from the input must appear in exactly one output segment
+
+Return ONLY a JSON object:
+{
+  "segments": [
+    {"text": "first part of the sentence"},
+    {"text": "second part of the sentence"}
+  ]
+}"""
+
+
+async def _split_overlength_segments(
+    segments: list[dict],
+    client: httpx.AsyncClient,
+    base_url: str,
+    api_key: str,
+    model: str,
+) -> list[dict]:
+    result = []
+    for seg in segments:
+        text = seg.get("text", "")
+        word_count = len(text.split())
+
+        if word_count <= PASS2_WORD_THRESHOLD:
+            result.append(seg)
+            continue
+
+        try:
+            response = await client.post(
+                f"{base_url}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": model,
+                    "messages": [
+                        {"role": "system", "content": PASS2_SPLIT_PROMPT},
+                        {"role": "user", "content": f"Split this text ({word_count} words) into 2-3 segments:\n\n{text}"},
+                    ],
+                    "temperature": 0.1,
+                    "max_tokens": 2048,
+                },
+                timeout=60.0,
+            )
+            response.raise_for_status()
+            data = response.json()
+            content = data["choices"][0]["message"]["content"]
+
+            content = content.strip()
+            if content.startswith("```json"):
+                content = content[7:]
+            if content.startswith("```"):
+                content = content[3:]
+            if content.endswith("```"):
+                content = content[:-3]
+
+            parsed = json.loads(content.strip())
+            sub_segments = parsed.get("segments", [])
+
+            if isinstance(sub_segments, list) and len(sub_segments) > 1:
+                original_words = " ".join(text.split()).lower()
+                reconstructed_words = " ".join(" ".join(s.get("text", "") for s in sub_segments).split()).lower()
+
+                if original_words == reconstructed_words:
+                    for sub in sub_segments:
+                        sub_text = sub.get("text", "").strip()
+                        if sub_text:
+                            result.append({
+                                "type": seg.get("type", "narration"),
+                                "text": sub_text,
+                                "speaker": seg.get("speaker"),
+                                "emotion": seg.get("emotion", "neutral"),
+                            })
+                    continue
+                else:
+                    logger.warning("Pass 2 split failed integrity check — words were altered. Keeping original segment.")
+        except Exception as e:
+            logger.warning(f"Pass 2 split failed for segment, keeping original: {e}")
+
+        result.append(seg)
+
+    return result
 
 
 def _normalize_llm_response(data: dict) -> dict:
@@ -206,77 +302,19 @@ async def _call_llm_for_section(
     if known_speakers:
         speaker_hint = f"\nKnown speakers from previous sections: {', '.join(known_speakers)}. Use these names when you recognize the same characters.\n"
 
-    custom_prompt = _load_custom_prompt()
+    saved_prompt = _load_prompt()
     emotions_str = ", ".join(CANONICAL_EMOTIONS)
 
-    if custom_prompt:
-        prompt_body = custom_prompt.replace("${VALID_EMOTIONS}", emotions_str)
-        prompt = f"""{prompt_body}
+    if not saved_prompt:
+        raise ValueError("No parsing prompt configured. Please set one in Settings.")
+
+    prompt_body = saved_prompt.replace("${VALID_EMOTIONS}", emotions_str)
+    prompt = f"""{prompt_body}
 {speaker_hint}
 Previous context: {context[:500] if context else 'Start of text'}
 
 TEXT TO ANALYZE:
 {section_text}
-
-Return ONLY valid JSON, no markdown fences."""
-    else:
-        prompt = f"""You are chunking text for a text-to-speech audiobook engine. Each chunk will be sent to a TTS engine as a separate audio clip, so chunk size directly controls audio segment length.
-
-TARGET: Aim for chunks of roughly 25 words (~10 seconds of speech). Chunks may be shorter or up to ~40 words when needed. The most important rule is that every chunk must break at a NATURAL PAUSE POINT — a place where a human reader would briefly pause.
-
-NATURAL PAUSE PRIORITY — THIS IS THE MOST IMPORTANT RULE:
-Always break chunks at natural speech boundaries. A shorter or longer chunk that ends at a natural pause is ALWAYS better than one that hits a word-count target but breaks mid-thought. Do NOT greedily pack words up to a limit — look ahead and choose the break point that sounds most natural when read aloud.
-
-Preferred break points (best to worst):
-1. Sentence boundaries (periods, question marks, exclamation marks)
-2. Semicolons, colons, or em-dashes
-3. Before conjunctions (and, but, or, so, yet, because, though, while)
-4. Before prepositional phrases (in, on, at, with, from, to, through, across, etc.)
-5. Commas
-
-BAD vs GOOD example:
-Given: "This is a short sentence. I'm going to ramble on and on noticing that this is a longer sentence and make sure that the sentence gets broken up at a bad spot instead of a more natural one."
-
-BAD (greedy fill, breaks mid-phrase):
-- Chunk 1: "This is a short sentence. I'm going to ramble on and on noticing that this is a longer sentence and make sure that the sentence gets broken up at a bad"
-- Chunk 2: "spot instead of a more natural one."
-
-GOOD (respects sentence boundary, even though Chunk 1 is short):
-- Chunk 1: "This is a short sentence."
-- Chunk 2: "I'm going to ramble on and on noticing that this is a longer sentence and make sure that the sentence gets broken up at a bad spot instead of a more natural one."
-
-ALSO GOOD (splits long sentence at a natural clause boundary):
-- Chunk 1: "This is a short sentence."
-- Chunk 2: "I'm going to ramble on and on noticing that this is a longer sentence"
-- Chunk 3: "and make sure that the sentence gets broken up at a bad spot instead of a more natural one."
-
-CHUNKING RULES:
-1. QUOTE BOUNDARIES: Quoted dialogue must always be its own chunk, separate from surrounding narration. Never mix dialogue and narration in one chunk.
-2. NATURAL PAUSES FIRST: Always prefer breaking at natural pause points over hitting a word-count target. A 5-word chunk that ends at a sentence boundary is better than a 25-word chunk that breaks mid-clause.
-3. SOFT SIZE GUIDE: Target ~25 words per chunk. Chunks under 10 words are fine if they are complete sentences or short dialogue. Chunks up to ~40 words are acceptable if breaking earlier would split a natural phrase. Avoid chunks over 40 words.
-4. KEEP SENTENCES WHOLE: Never split a single sentence that is under 40 words. Keep it as one chunk even if it exceeds the ~25 word target. The soft max exists specifically to avoid breaking sentences. For example, a 36-word sentence must stay as one chunk — do NOT split it into a 22-word fragment and a 14-word fragment.
-5. TYPE: Each chunk is either "narration" or "dialogue", never both.
-6. SPEAKER: For dialogue, identify the speaker by name from context. For narration, speaker is null.
-7. EMOTION: Assign exactly one emotion per chunk from: {emotions_str}
-8. PRESERVE TEXT: Copy the original text exactly — do not paraphrase, summarize, or omit any words.
-{speaker_hint}
-Previous context: {context[:500] if context else 'Start of text'}
-
-TEXT TO ANALYZE:
-{section_text}
-
-Return ONLY a JSON object:
-{{
-  "segments": [
-    {{
-      "type": "narration" or "dialogue",
-      "text": "exact text from the passage",
-      "speaker": "speaker name or null for narration",
-      "emotion": "one emotion from the list above"
-    }}
-  ],
-  "detectedSpeakers": ["list", "of", "speaker", "names"]
-}}
 
 Return ONLY valid JSON, no markdown fences."""
 
@@ -312,6 +350,11 @@ Return ONLY valid JSON, no markdown fences."""
 
         raw_result = json.loads(content.strip())
         result = _normalize_llm_response(raw_result)
+
+        result["segments"] = await _split_overlength_segments(
+            result.get("segments", []), client, base_url, api_key, model
+        )
+
         return result
     except json.JSONDecodeError as e:
         logger.error(f"LLM returned invalid JSON: {e}\nRaw content: {content[:500] if content else '(empty)'}")
@@ -573,7 +616,12 @@ async def _run_segmentation(project_id: str, model: str):
                     if all_known_speakers:
                         chapter.speakers_json = json.dumps(all_known_speakers)
 
-                    chapter.status = "segmented"
+                    failed_sections = sum(1 for s in all_chapter_sections if s.status == "failed")
+                    if failed_sections == len(all_chapter_sections) and all_chapter_sections:
+                        chapter.status = "failed"
+                        chapter.error_message = "All sections failed to segment"
+                    else:
+                        chapter.status = "segmented"
                     db.commit()
 
                 except Exception as e:

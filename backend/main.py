@@ -32,16 +32,17 @@ from models import (
 )
 from database import (
     get_db_session, TTSEngineEndpoint, VoiceLibraryEntry, CustomVoice,
-    Project, ProjectChapter, ProjectSection, ProjectChunk, ProjectAudioFile
+    Project, ProjectChapter, ProjectSection, ProjectChunk, ProjectAudioFile,
+    AppSetting,
 )
 from remote_tts_client import RemoteTTSClient
-from project_segmenter import segment_project_background, split_into_sections
+from project_segmenter import segment_project_background, split_into_sections, _call_llm_for_section
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-TARGET_CHUNK_WORDS = 25
-MAX_CHUNK_WORDS = 30
+TARGET_CHUNK_WORDS = 30
+MAX_CHUNK_WORDS = 40
 
 def rechunk_segment(text: str) -> list[str]:
     """Re-chunk a segment that exceeds the target word count using smart splitting."""
@@ -831,115 +832,13 @@ async def parse_text_llm_stream(request: ParseTextLLMRequest):
         "excited", "calm", "anxious", "hopeful", "melancholy", "tender", "proud",
     ]
 
-    def validate_llm_response(data: dict) -> bool:
-        """Validate LLM response has required structure."""
-        if not isinstance(data, dict):
-            return False
-        if "segments" not in data or not isinstance(data.get("segments"), list):
-            return False
-        for seg in data["segments"]:
-            if not isinstance(seg, dict):
-                return False
-            if "type" not in seg or "text" not in seg:
-                return False
-            if seg["type"] not in ["narration", "dialogue"]:
-                return False
-        return True
-    
     async def call_llm_for_chunk(client: httpx.AsyncClient, chunk: str, known_speakers: list[str], context: str) -> dict:
-        """Call LLM to segment and chunk text in one pass."""
-        speaker_hint = ""
-        if known_speakers:
-            speaker_hint = f"\nKnown speakers from previous sections: {', '.join(known_speakers)}. Use these names when you recognize the same characters.\n"
-        
-        prompt = f"""You are chunking text for a text-to-speech audiobook engine. Each chunk will be sent to a TTS engine as a separate audio clip, so chunk size directly controls audio segment length.
-
-TARGET: Each chunk must be 20-30 words (8-12 seconds of speech at 2.5 words/second). This is critical — TTS engines produce poor quality on long inputs.
-
-CHUNKING RULES (in priority order):
-1. QUOTE BOUNDARIES: Quoted dialogue must always be its own chunk, separate from surrounding narration. Never mix dialogue and narration in one chunk.
-2. SIZE LIMIT: No chunk may exceed 30 words. If a sentence or paragraph is longer than 30 words, you MUST split it at a natural pause point:
-   - First preference: sentence boundaries (periods, question marks, exclamation marks)
-   - Second preference: semicolons, colons, or em-dashes
-   - Third preference: commas or conjunctions (and, but, or, so, yet, because, though, while)
-3. MINIMUM SIZE: Avoid chunks under 10 words unless they are short dialogue (e.g. "Yes," he said).
-4. TYPE: Each chunk is either "narration" or "dialogue", never both.
-5. SPEAKER: For dialogue, identify the speaker by name from context. For narration, speaker is null.
-6. EMOTION: Assign exactly one emotion per chunk from: {CANONICAL_EMOTIONS}
-7. PRESERVE TEXT: Copy the original text exactly — do not paraphrase, summarize, or omit any words.
-
-EXAMPLE — given this input:
-"She walked through the crowded marketplace, scanning the stalls for anything useful. The smell of fresh bread drifted from a nearby bakery, mixing with the sharp tang of fish from the harbor. \\"Looking for something specific?\\" the old merchant asked, leaning forward with a knowing smile."
-
-Correct output (3 chunks, not 1):
-- "She walked through the crowded marketplace, scanning the stalls for anything useful." (13 words, narration)
-- "The smell of fresh bread drifted from a nearby bakery, mixing with the sharp tang of fish from the harbor." (20 words, narration)
-- "Looking for something specific?" (4 words, dialogue, speaker: merchant)
-{speaker_hint}
-Previous context: {context[:500] if context else 'Start of text'}
-
-TEXT TO ANALYZE:
-{chunk}
-
-Return ONLY a JSON object:
-{{
-  "segments": [
-    {{
-      "type": "narration" or "dialogue",
-      "text": "exact text from the passage",
-      "speaker": "speaker name or null for narration",
-      "emotion": "one emotion from the list above"
-    }}
-  ],
-  "detectedSpeakers": ["list", "of", "speaker", "names"]
-}}
-
-Return ONLY valid JSON, no markdown fences."""
-
+        """Call shared LLM parsing function from project_segmenter."""
         try:
-            response = await client.post(
-                f"{OPENROUTER_BASE_URL}/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": request.model,
-                    "messages": [
-                        {"role": "system", "content": "You are a text analysis assistant. Always respond with valid JSON only."},
-                        {"role": "user", "content": prompt}
-                    ],
-                    "temperature": 0.3,
-                    "max_tokens": 4096,
-                },
-                timeout=60.0,
+            return await _call_llm_for_section(
+                client, chunk, known_speakers, context,
+                request.model, OPENROUTER_BASE_URL, OPENROUTER_API_KEY
             )
-            response.raise_for_status()
-            data = response.json()
-            content = data["choices"][0]["message"]["content"]
-            
-            content = content.strip()
-            if content.startswith("```json"):
-                content = content[7:]
-            if content.startswith("```"):
-                content = content[3:]
-            if content.endswith("```"):
-                content = content[:-3]
-            
-            result = json.loads(content.strip())
-            
-            if not validate_llm_response(result):
-                logger.warning(f"LLM response failed validation, using fallback parser")
-                return fallback_parse_chunk(chunk, known_speakers=known_speakers)
-            
-            if not result.get("segments"):
-                logger.warning(f"LLM returned empty segments, using fallback parser")
-                return fallback_parse_chunk(chunk, known_speakers=known_speakers)
-            
-            return result
-        except json.JSONDecodeError as e:
-            logger.error(f"LLM returned invalid JSON: {e}")
-            return fallback_parse_chunk(chunk, known_speakers=known_speakers)
         except Exception as e:
             logger.error(f"LLM call failed: {e}")
             return fallback_parse_chunk(chunk, known_speakers=known_speakers)
@@ -1018,98 +917,32 @@ Return ONLY valid JSON, no markdown fences."""
 
 @app.post("/parse-text-llm")
 async def parse_text_llm(request: ParseTextLLMRequest):
-    """Parse text using LLM (non-streaming fallback)"""
+    """Parse text using LLM (non-streaming fallback) — delegates to shared parsing function."""
     import httpx
-    
+
     OPENROUTER_BASE_URL = os.environ.get("AI_INTEGRATIONS_OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
     OPENROUTER_API_KEY = os.environ.get("AI_INTEGRATIONS_OPENROUTER_API_KEY", "")
-    
+
     CANONICAL_EMOTIONS = [
         "neutral", "happy", "sad", "angry", "fear", "disgust", "surprise",
         "excited", "calm", "anxious", "hopeful", "melancholy", "tender", "proud",
     ]
-    
-    speaker_hint = ""
-    if request.knownSpeakers:
-        speaker_hint = f"\nKnown speakers: {', '.join(request.knownSpeakers)}. Use these names when you recognize the same characters.\n"
-    
-    prompt = f"""You are chunking text for a text-to-speech audiobook engine. Each chunk will be sent to a TTS engine as a separate audio clip, so chunk size directly controls audio segment length.
-
-TARGET: Each chunk must be 20-30 words (8-12 seconds of speech at 2.5 words/second). This is critical — TTS engines produce poor quality on long inputs.
-
-CHUNKING RULES (in priority order):
-1. QUOTE BOUNDARIES: Quoted dialogue must always be its own chunk, separate from surrounding narration. Never mix dialogue and narration in one chunk.
-2. SIZE LIMIT: No chunk may exceed 30 words. If a sentence or paragraph is longer than 30 words, you MUST split it at a natural pause point:
-   - First preference: sentence boundaries (periods, question marks, exclamation marks)
-   - Second preference: semicolons, colons, or em-dashes
-   - Third preference: commas or conjunctions (and, but, or, so, yet, because, though, while)
-3. MINIMUM SIZE: Avoid chunks under 10 words unless they are short dialogue (e.g. "Yes," he said).
-4. TYPE: Each chunk is either "narration" or "dialogue", never both.
-5. SPEAKER: For dialogue, identify the speaker by name from context. For narration, speaker is null.
-6. EMOTION: Assign exactly one emotion per chunk from: {CANONICAL_EMOTIONS}
-7. PRESERVE TEXT: Copy the original text exactly — do not paraphrase, summarize, or omit any words.
-
-EXAMPLE — given this input:
-"She walked through the crowded marketplace, scanning the stalls for anything useful. The smell of fresh bread drifted from a nearby bakery, mixing with the sharp tang of fish from the harbor. \\"Looking for something specific?\\" the old merchant asked, leaning forward with a knowing smile."
-
-Correct output (3 chunks, not 1):
-- "She walked through the crowded marketplace, scanning the stalls for anything useful." (13 words, narration)
-- "The smell of fresh bread drifted from a nearby bakery, mixing with the sharp tang of fish from the harbor." (20 words, narration)
-- "Looking for something specific?" (4 words, dialogue, speaker: merchant)
-{speaker_hint}
-TEXT TO ANALYZE:
-{request.text[:8000]}
-
-Return ONLY a JSON object:
-{{
-  "segments": [
-    {{"type": "narration" or "dialogue", "text": "exact text from the passage", "speaker": "name or null", "emotion": "one emotion from the list above"}}
-  ],
-  "detectedSpeakers": ["list", "of", "names"]
-}}
-
-Return ONLY valid JSON, no markdown fences."""
 
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{OPENROUTER_BASE_URL}/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": request.model,
-                    "messages": [
-                        {"role": "system", "content": "You are a text analysis assistant. Always respond with valid JSON only."},
-                        {"role": "user", "content": prompt},
-                    ],
-                    "temperature": 0.3,
-                    "max_tokens": 8192,
-                },
-                timeout=120.0,
+            result = await _call_llm_for_section(
+                client, request.text[:8000],
+                request.knownSpeakers or [], "",
+                request.model, OPENROUTER_BASE_URL, OPENROUTER_API_KEY
             )
-            response.raise_for_status()
-            data = response.json()
-            content = data["choices"][0]["message"]["content"]
-            
-            content = content.strip()
-            if content.startswith("```json"):
-                content = content[7:]
-            if content.startswith("```"):
-                content = content[3:]
-            if content.endswith("```"):
-                content = content[:-3]
-            
-            result = json.loads(content.strip())
-            
+
             segments = []
             for seg in result.get("segments", []):
                 seg_text = seg.get("text", "")
                 emotion = seg.get("emotion", seg.get("sentiment", "neutral"))
                 if emotion not in CANONICAL_EMOTIONS:
                     emotion = "neutral"
-                
+
                 sub_texts = rechunk_segment(seg_text)
                 for st in sub_texts:
                     wc = len(st.split())
@@ -1126,7 +959,7 @@ Return ONLY valid JSON, no markdown fences."""
                         "wordCount": wc,
                         "approxDurationSeconds": round(wc / 2.5, 1),
                     })
-            
+
             return {
                 "segments": segments,
                 "detectedSpeakers": result.get("detectedSpeakers", []),
@@ -1294,9 +1127,10 @@ init_database()
 
 @app.on_event("startup")
 async def startup_event():
-    """Run cleanup loop on startup and load custom voices."""
+    """Run cleanup loop on startup, load custom voices, seed settings."""
     import asyncio
     _load_custom_voices_from_db()
+    _seed_parsing_prompt()
     asyncio.create_task(run_cleanup_loop())
 
 
@@ -1730,21 +1564,119 @@ async def update_prosody_settings(request: ProsodySettingsRequest):
     }
 
 
-PARSING_PROMPT_FILE = Path("parsing_prompt_settings.json")
+PARSING_PROMPT_SETTING_KEY = "parsing_prompt"
+
+INITIAL_PARSING_PROMPT = """You are splitting text into individual sentences for a text-to-speech audiobook engine. Your ONLY job is to split at sentence boundaries and quote boundaries, and assign speaker/emotion metadata. Do NOT consider chunk length or word count at all.
+
+SPLITTING RULES — THESE ARE THE ONLY VALID SPLIT POINTS:
+1. SENTENCE BOUNDARIES: Split at every sentence ending (period, question mark, exclamation mark). Each sentence becomes its own segment.
+2. QUOTE BOUNDARIES: Always split where dialogue (quoted text) begins or ends. Quoted dialogue must always be its own segment, separate from surrounding narration. Never mix dialogue and narration in one segment. If a quoted segment starts mid-sentence, that is a valid split point.
+3. NO OTHER SPLITS: Do NOT split for any other reason. Do not split at commas, conjunctions, prepositions, or any other point within a sentence. Keep each complete sentence as a single segment regardless of how long it is. A 50-word sentence stays as one segment. A 60-word sentence stays as one segment.
+
+TYPE: Each segment is either "spoken" (dialogue in quotes) or "narration" (everything else).
+
+SPEAKER IDENTIFICATION — CRITICAL:
+You MUST identify a speaker for EVERY spoken segment. Never leave speaker_candidates empty or omit it. Use ALL available evidence to determine who is speaking:
+
+1. EXPLICIT DIALOGUE TAGS: "said John", "Mary whispered", "he replied" — use the named character directly.
+2. PRONOUN RESOLUTION: If the tag says "he said" or "she asked", look at the surrounding narration to determine which character "he" or "she" refers to. Assign that character as the speaker.
+3. TURN-TAKING ORDER: In a conversation between two or more characters, speakers typically alternate. If Character A spoke last, the next quote is very likely Character B. Use this pattern.
+4. NARRATIVE CONTEXT: If narration describes a character's actions or thoughts immediately before a quote (e.g., "John stepped forward. \\"Let's go.\\""), that character is almost certainly the speaker.
+5. CONTENT AND TONE: What is said can indicate who is speaking — a character's known personality, role, or speech patterns can help identify them.
+6. SCENE CONTEXT: Consider who is present in the scene. If only two characters are in a room, all dialogue must be between them.
+7. BEST GUESS AT LOW CONFIDENCE: If you cannot determine the speaker with high confidence, you MUST still provide your best guess. A low-confidence identification (e.g., 0.4) is far better than no identification at all. Use "Unknown" only as an absolute last resort when there are zero contextual clues whatsoever.
+
+Examples of speaker inference:
+- "She turned to leave. \\"I'll be back,\\" she promised." → The speaker is whoever "she" refers to in context. Assign that character with high confidence.
+- After a line from John: "\\"That's ridiculous!\\"" (no dialogue tag) → Likely the other character in the conversation (turn-taking). Assign with moderate confidence (0.6-0.7).
+- "The doctor examined the chart. \\"We need to operate immediately.\\"" → The doctor is speaking (narrative context). Assign with high confidence.
+
+EMOTION: Assign exactly one emotion per segment from this FIXED list ONLY: ${VALID_EMOTIONS}
+
+| Emotion    | Use When                                           |
+|------------|---------------------------------------------------|
+| neutral    | Default, factual narration, no strong emotion     |
+| happy      | Joy, pleasure, satisfaction, positive outcomes    |
+| sad        | Sorrow, disappointment, loss, grief               |
+| angry      | Frustration, rage, annoyance, confrontation       |
+| fear       | Fear, worry, dread, danger, threat                |
+| disgust    | Revulsion, disapproval, distaste                  |
+| surprise   | Shock, astonishment, unexpected events            |
+| excited    | Enthusiasm, anticipation, energy, thrill          |
+| calm       | Peaceful, serene, relaxed, reassuring             |
+| anxious    | Nervousness, unease, tension, apprehension        |
+| hopeful    | Optimism, anticipation of good, looking forward   |
+| melancholy | Wistful sadness, nostalgia, bittersweet feelings  |
+| tender     | Gentle affection, warmth, intimacy, caring        |
+| proud      | Achievement, dignity, self-assurance, satisfaction|
+
+EXAMPLE — given: "She walked through the crowded marketplace, scanning the stalls for anything useful. The smell of fresh bread drifted from a nearby bakery, mixing with the sharp tang of fish from the harbor. \\"Looking for something specific?\\" the old merchant asked, leaning forward."
+
+Correct output — 3 segments in 1 chunk, NOT 1 large segment:
+- Segment 1 (narration, 13w): "She walked through the crowded marketplace, scanning the stalls for anything useful."
+- Segment 2 (narration, 20w): "The smell of fresh bread drifted from a nearby bakery, mixing with the sharp tang of fish from the harbor."
+- Segment 3 (spoken, 8w): "\\"Looking for something specific?\\" the old merchant asked, leaning forward." → speaker_candidates: {{"the old merchant": 0.95}}
+
+Return JSON in this exact format:
+{{
+  "characters": ["Character Name 1", "Character Name 2"],
+  "chunks": [
+    {{
+      "chunk_id": 1,
+      "approx_duration_seconds": 10,
+      "segments": [
+        {{
+          "type": "spoken",
+          "text": "The exact quoted text including quotes",
+          "speaker_candidates": {{"CharacterA": 0.9, "CharacterB": 0.1}},
+          "emotion": {{"label": "happy", "score": 0.8}}
+        }},
+        {{
+          "type": "narration",
+          "text": "The narration text",
+          "emotion": {{"label": "neutral", "score": 0.7}}
+        }}
+      ]
+    }}
+  ]
+}}
+
+Important:
+- Preserve the EXACT text including quotation marks — do not paraphrase, summarize, or omit words
+- Include ALL text with no gaps
+- Chunk IDs should be sequential starting from the provided starting ID
+- Use context from previous exchanges to identify speakers consistently
+- ONLY use emotions from the fixed list above — do not invent new emotion labels
+- EVERY spoken segment MUST have a non-empty speaker_candidates object — never omit it"""
+
+
+def _seed_parsing_prompt():
+    db = get_db_session()
+    try:
+        existing = db.query(AppSetting).filter(AppSetting.key == PARSING_PROMPT_SETTING_KEY).first()
+        if not existing:
+            setting = AppSetting(key=PARSING_PROMPT_SETTING_KEY, value=INITIAL_PARSING_PROMPT)
+            db.add(setting)
+            db.commit()
+            logger.info("Seeded initial parsing prompt into database")
+    except Exception as e:
+        db.rollback()
+        logger.warning(f"Failed to seed parsing prompt: {e}")
+    finally:
+        db.close()
 
 
 @app.get("/parsing-prompt")
 async def get_parsing_prompt():
-    """Get the current custom parsing/speaker-identification prompt, or indicate default is in use."""
-    if PARSING_PROMPT_FILE.exists():
-        try:
-            with open(PARSING_PROMPT_FILE, "r") as f:
-                data = json.load(f)
-            if data.get("prompt"):
-                return {"prompt": data["prompt"], "isCustom": True}
-        except Exception as e:
-            logger.warning(f"Failed to load parsing prompt: {e}")
-    return {"prompt": "", "isCustom": False}
+    """Get the current parsing prompt from the database."""
+    db = get_db_session()
+    try:
+        setting = db.query(AppSetting).filter(AppSetting.key == PARSING_PROMPT_SETTING_KEY).first()
+        if setting and setting.value:
+            return {"prompt": setting.value}
+        return {"prompt": ""}
+    finally:
+        db.close()
 
 
 class ParsingPromptRequest(BaseModel):
@@ -1753,28 +1685,26 @@ class ParsingPromptRequest(BaseModel):
 
 @app.post("/parsing-prompt")
 async def update_parsing_prompt(request: ParsingPromptRequest):
-    """Save a custom parsing/speaker-identification prompt."""
+    """Save the parsing prompt to the database."""
+    if not request.prompt or not request.prompt.strip():
+        raise HTTPException(status_code=400, detail="Prompt cannot be empty.")
+    db = get_db_session()
     try:
-        with open(PARSING_PROMPT_FILE, "w") as f:
-            json.dump({"prompt": request.prompt}, f, indent=2)
-        logger.info("Saved custom parsing prompt to file")
-        return {"success": True, "isCustom": bool(request.prompt)}
+        setting = db.query(AppSetting).filter(AppSetting.key == PARSING_PROMPT_SETTING_KEY).first()
+        if setting:
+            setting.value = request.prompt
+        else:
+            setting = AppSetting(key=PARSING_PROMPT_SETTING_KEY, value=request.prompt)
+            db.add(setting)
+        db.commit()
+        logger.info("Saved parsing prompt to database")
+        return {"success": True}
     except Exception as e:
+        db.rollback()
         logger.error(f"Failed to save parsing prompt: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.delete("/parsing-prompt")
-async def reset_parsing_prompt():
-    """Reset to the default parsing prompt by removing the custom file."""
-    try:
-        if PARSING_PROMPT_FILE.exists():
-            PARSING_PROMPT_FILE.unlink()
-        logger.info("Reset parsing prompt to default")
-        return {"success": True, "isCustom": False}
-    except Exception as e:
-        logger.error(f"Failed to reset parsing prompt: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
 
 
 TTS_SETTINGS_FILE = Path(__file__).parent.parent / "tts_settings.json"

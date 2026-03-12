@@ -440,20 +440,16 @@ export function SettingsTab() {
     queryKey: ["/api/voice-library-db"],
   });
 
-  const { data: savedPromptData } = useQuery<{ prompt: string; isCustom: boolean }>({
+  const { data: savedPromptData } = useQuery<{ prompt: string }>({
     queryKey: ["/api/parsing-prompt"],
   });
 
-  const { data: defaultPromptData } = useQuery<{ prompt: string }>({
-    queryKey: ["/api/parsing-prompt/default"],
-  });
-
   useEffect(() => {
-    if (!parsingPromptLoaded && savedPromptData && defaultPromptData) {
-      setParsingPromptText(savedPromptData.isCustom ? savedPromptData.prompt : defaultPromptData.prompt);
+    if (!parsingPromptLoaded && savedPromptData) {
+      setParsingPromptText(savedPromptData.prompt || "");
       setParsingPromptLoaded(true);
     }
-  }, [savedPromptData, defaultPromptData, parsingPromptLoaded]);
+  }, [savedPromptData, parsingPromptLoaded]);
 
   const saveParsingPromptMutation = useMutation({
     mutationFn: async (prompt: string) => {
@@ -462,27 +458,10 @@ export function SettingsTab() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/parsing-prompt"] });
-      toast({ title: "Parsing prompt saved", description: "Your custom prompt will be used for future text analysis." });
+      toast({ title: "Parsing prompt saved", description: "Changes will take effect on the next text analysis." });
     },
     onError: (error: Error) => {
       toast({ title: "Failed to save prompt", description: error.message, variant: "destructive" });
-    },
-  });
-
-  const resetParsingPromptMutation = useMutation({
-    mutationFn: async () => {
-      const response = await apiRequest("DELETE", "/api/parsing-prompt");
-      return response.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/parsing-prompt"] });
-      if (defaultPromptData) {
-        setParsingPromptText(defaultPromptData.prompt);
-      }
-      toast({ title: "Prompt reset", description: "Parsing prompt has been reset to the default." });
-    },
-    onError: (error: Error) => {
-      toast({ title: "Failed to reset prompt", description: error.message, variant: "destructive" });
     },
   });
 
@@ -1173,33 +1152,24 @@ export function SettingsTab() {
                 Customize the system prompt used by the LLM for text chunking, speaker identification, and emotion assignment
               </CardDescription>
             </div>
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => resetParsingPromptMutation.mutate()}
-                disabled={resetParsingPromptMutation.isPending}
-                data-testid="button-reset-parsing-prompt"
-              >
-                <RotateCcw className="h-4 w-4 mr-1" />
-                Reset to Default
-              </Button>
-              <Button
-                size="sm"
-                onClick={() => saveParsingPromptMutation.mutate(parsingPromptText)}
-                disabled={saveParsingPromptMutation.isPending || !parsingPromptLoaded}
-                data-testid="button-save-parsing-prompt"
-              >
-                <Save className="h-4 w-4 mr-1" />
-                Save
-              </Button>
-            </div>
+            <Button
+              size="sm"
+              onClick={() => {
+                if (!parsingPromptText.trim()) {
+                  toast({ title: "Prompt cannot be empty", variant: "destructive" });
+                  return;
+                }
+                saveParsingPromptMutation.mutate(parsingPromptText);
+              }}
+              disabled={saveParsingPromptMutation.isPending || !parsingPromptLoaded}
+              data-testid="button-save-parsing-prompt"
+            >
+              <Save className="h-4 w-4 mr-1" />
+              Save
+            </Button>
           </div>
         </CardHeader>
         <CardContent>
-          {savedPromptData?.isCustom && (
-            <Badge variant="secondary" className="mb-3">Custom prompt active</Badge>
-          )}
           <textarea
             className="w-full min-h-[400px] p-3 rounded-md border bg-background text-sm font-mono resize-y focus:outline-none focus:ring-2 focus:ring-ring"
             value={parsingPromptText}

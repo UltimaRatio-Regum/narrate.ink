@@ -286,6 +286,14 @@ class ProjectAudioFile(Base):
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
 
+class AppSetting(Base):
+    __tablename__ = "app_settings"
+
+    key = Column(String, primary_key=True)
+    value = Column(Text, nullable=False)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 engine = None
 SessionLocal = None
 
