@@ -18,7 +18,7 @@ from pydub import AudioSegment
 from database import JobStatus, SegmentStatus, get_db_session, TTSJob, TTSSegment, CustomVoice, TTSEngineEndpoint, VoiceLibraryEntry, ProjectAudioFile
 from job_manager import (
     update_job_status, update_segment_status, 
-    TTS_OUTPUT_DIR, active_jobs
+    TTS_OUTPUT_DIR, active_jobs, _cancel_tokens
 )
 from tts_service import TTSService
 from audio_processor import AudioProcessor
@@ -51,7 +51,7 @@ def _start_next_for_engine(engine: str):
         _engine_busy[engine] = False
 
 
-async def process_job(job_id: str):
+async def process_job(job_id: str, cancel_token: threading.Event = None):
     """Process a TTS job - generates audio for each segment."""
     logger.info(f"Starting TTS job: {job_id}")
     
@@ -92,7 +92,7 @@ async def process_job(job_id: str):
         try:
             await remote_client.wake_up(
                 timeout=300.0,
-                is_cancelled=lambda: job_id not in active_jobs,
+                is_cancelled=lambda: cancel_token is not None and cancel_token.is_set(),
             )
             logger.info(f"Remote engine {tts_engine} is ready for job {job_id}")
         except asyncio.CancelledError:
@@ -124,8 +124,9 @@ async def process_job(job_id: str):
         for seg_data in segment_data:
             segment_id = seg_data["id"]
             
-            if job_id not in active_jobs:
-                logger.info(f"Job {job_id} was cancelled")
+            if cancel_token is not None and cancel_token.is_set():
+                logger.info(f"Job {job_id} was cancelled (token set)")
+                update_job_status(job_id, JobStatus.CANCELLED)
                 return
             
             try:
@@ -181,6 +182,7 @@ async def process_job(job_id: str):
             except asyncio.CancelledError:
                 logger.info(f"Job {job_id} cancelled during segment {segment_id}")
                 update_segment_status(segment_id, SegmentStatus.FAILED, error_message="Job cancelled")
+                update_job_status(job_id, JobStatus.CANCELLED)
                 return
             except Exception as e:
                 logger.error(f"Failed to process segment {segment_id}: {e}")
@@ -202,8 +204,7 @@ async def process_job(job_id: str):
             except OSError:
                 pass
         
-        if job_id in active_jobs:
-            del active_jobs[job_id]
+        active_jobs.pop(job_id, None)
 
 
 def _persist_project_audio(job_id: str, config: Dict[str, Any], tts_engine: str, narrator_voice_id: str):
@@ -676,11 +677,14 @@ def convert_to_mp3(audio: np.ndarray, sample_rate: int) -> bytes:
 
 
 def _launch_job_thread(job_id: str, engine: str):
+    cancel_token = threading.Event()
+    _cancel_tokens[job_id] = cancel_token
+
     def run_in_thread():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            loop.run_until_complete(process_job(job_id))
+            loop.run_until_complete(process_job(job_id, cancel_token))
         except Exception as e:
             logger.error(f"Job {job_id} failed: {e}")
             update_job_status(job_id, JobStatus.FAILED, error_message=str(e))
@@ -688,6 +692,7 @@ def _launch_job_thread(job_id: str, engine: str):
                 del active_jobs[job_id]
         finally:
             loop.close()
+            _cancel_tokens.pop(job_id, None)
             _start_next_for_engine(engine)
 
     thread = threading.Thread(target=run_in_thread, daemon=True)

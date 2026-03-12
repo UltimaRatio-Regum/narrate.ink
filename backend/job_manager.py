@@ -22,7 +22,8 @@ logger = logging.getLogger(__name__)
 TTS_OUTPUT_DIR = "/tmp/tts_jobs"
 os.makedirs(TTS_OUTPUT_DIR, exist_ok=True)
 
-active_jobs: Dict[str, asyncio.Task] = {}
+active_jobs: Dict[str, threading.Thread] = {}
+_cancel_tokens: Dict[str, threading.Event] = {}
 job_executor = ThreadPoolExecutor(max_workers=4)
 
 
@@ -246,10 +247,10 @@ def cancel_job(job_id: str) -> bool:
     
     remove_job_from_engine_queue(job_id)
     
+    if job_id in _cancel_tokens:
+        _cancel_tokens[job_id].set()
+    
     if job_id in active_jobs:
-        task = active_jobs[job_id]
-        if hasattr(task, 'cancel'):
-            task.cancel()
         del active_jobs[job_id]
     
     update_job_status(job_id, JobStatus.CANCELLED)
