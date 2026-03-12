@@ -33,7 +33,7 @@ from models import (
 from database import (
     get_db_session, TTSEngineEndpoint, VoiceLibraryEntry, CustomVoice,
     Project, ProjectChapter, ProjectSection, ProjectChunk, ProjectAudioFile,
-    AppSetting,
+    AppSetting, TTSJob, JobStatus,
 )
 from remote_tts_client import RemoteTTSClient
 from project_segmenter import segment_project_background, split_into_sections, _call_llm_for_section
@@ -1127,11 +1127,29 @@ init_database()
 
 @app.on_event("startup")
 async def startup_event():
-    """Run cleanup loop on startup, load custom voices, seed settings."""
+    """Run cleanup loop on startup, load custom voices, seed settings, reset orphaned jobs."""
     import asyncio
     _load_custom_voices_from_db()
     _seed_parsing_prompt()
+    _reset_orphaned_waiting_jobs()
     asyncio.create_task(run_cleanup_loop())
+
+
+def _reset_orphaned_waiting_jobs():
+    """Reset any jobs stuck in WAITING or PROCESSING from a previous process."""
+    db = get_db_session()
+    try:
+        orphaned = db.query(TTSJob).filter(
+            TTSJob.status.in_([JobStatus.WAITING.value, JobStatus.PROCESSING.value])
+        ).all()
+        for job in orphaned:
+            job.status = JobStatus.PENDING.value
+            job.error_message = None
+        if orphaned:
+            db.commit()
+            logger.info(f"Reset {len(orphaned)} orphaned jobs to pending")
+    finally:
+        db.close()
 
 
 class CreateJobRequest(BaseModel):
