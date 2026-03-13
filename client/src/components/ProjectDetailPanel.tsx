@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Wand2, Save, Book, Layers, FileText, Type, Download, Upload, X, Image, Users, AlertTriangle, RefreshCw, Merge, CheckSquare } from "lucide-react";
+import { Wand2, Save, Book, Layers, FileText, Type, Download, Upload, X, Image, Users, AlertTriangle, RefreshCw, Merge, CheckSquare, Loader2 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -161,10 +161,13 @@ export function ProjectDetailPanel({ selection, project, onRefresh }: ProjectDet
   const currentScopeId = selection.type === "project" ? project.id : selection.id;
   const currentStats = audioStats[currentScopeId];
   const hasAnyAudio = currentStats && currentStats.withAudio > 0;
+  const [isDownloading, setIsDownloading] = useState(false);
 
   const handleDownload = async () => {
     const scope = selection.type === "project" ? "project" : selection.type;
     const scopeId = selection.type === "project" ? "" : selection.id;
+    setIsDownloading(true);
+    toast({ title: "Preparing download...", description: "This may take a moment for large projects." });
     try {
       const response = await fetch(`/api/projects/${project.id}/download?scope=${scope}&scopeId=${scopeId}`, {
         credentials: "include",
@@ -179,8 +182,11 @@ export function ProjectDetailPanel({ selection, project, onRefresh }: ProjectDet
       a.download = match?.[1] || `${project.title || "audiobook"}.${project.outputFormat === "m4b" ? "m4b" : "mp3"}`;
       a.click();
       URL.revokeObjectURL(url);
+      toast({ title: "Download complete" });
     } catch {
       toast({ title: "Download failed", description: "Could not download audio", variant: "destructive" });
+    } finally {
+      setIsDownloading(false);
     }
   };
 
@@ -229,11 +235,16 @@ export function ProjectDetailPanel({ selection, project, onRefresh }: ProjectDet
                 size="sm"
                 variant="outline"
                 onClick={handleDownload}
+                disabled={isDownloading}
                 data-testid="button-download-audio"
               >
-                <Download className="h-3.5 w-3.5 mr-1" />
-                Download {selection.type}
-                {currentStats && (
+                {isDownloading ? (
+                  <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                ) : (
+                  <Download className="h-3.5 w-3.5 mr-1" />
+                )}
+                {isDownloading ? "Downloading..." : `Download ${selection.type}`}
+                {!isDownloading && currentStats && (
                   <span className="ml-1 text-xs text-muted-foreground">
                     ({currentStats.withAudio}/{currentStats.total})
                   </span>
@@ -453,6 +464,7 @@ function ProjectSettingsPanel({
 
   const handleExport = async () => {
     setIsExporting(true);
+    toast({ title: "Preparing export...", description: "Saving settings and building your audiobook file." });
     try {
       await apiRequest("PATCH", `/api/projects/${project.id}`, {
         ttsEngine,
@@ -911,7 +923,11 @@ function ProjectSettingsPanel({
           disabled={isExporting}
           data-testid="button-export"
         >
-          <Download className="h-4 w-4 mr-2" />
+          {isExporting ? (
+            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+          ) : (
+            <Download className="h-4 w-4 mr-2" />
+          )}
           {isExporting ? "Exporting..." : "Export"}
         </Button>
       </div>

@@ -145,8 +145,12 @@ export function JobsPanel({ onPlayAudio }: JobsPanelProps) {
     }
   };
 
+  const [downloadingJobId, setDownloadingJobId] = useState<string | null>(null);
+
   const downloadJobAudio = async (jobId: string) => {
     const maxSilenceMs = localStorage.getItem("voxlibris-max-silence-ms") || "300";
+    setDownloadingJobId(jobId);
+    toast({ title: "Preparing download..." });
     try {
       const response = await fetch(`/api/jobs/${jobId}/audio?max_silence_ms=${maxSilenceMs}`, {
         credentials: "include",
@@ -161,8 +165,11 @@ export function JobsPanel({ onPlayAudio }: JobsPanelProps) {
       a.download = match?.[1] || `job-${jobId}.wav`;
       a.click();
       URL.revokeObjectURL(url);
+      toast({ title: "Download complete" });
     } catch {
       toast({ title: "Download failed", description: "Could not download audio", variant: "destructive" });
+    } finally {
+      setDownloadingJobId(null);
     }
   };
 
@@ -268,10 +275,15 @@ export function JobsPanel({ onPlayAudio }: JobsPanelProps) {
                         size="sm"
                         variant="ghost"
                         onClick={() => downloadJobAudio(job.id)}
+                        disabled={downloadingJobId === job.id}
                         data-testid={`job-download-${job.id}`}
                       >
-                        <Download className="h-3.5 w-3.5 mr-1" />
-                        Download
+                        {downloadingJobId === job.id ? (
+                          <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                        ) : (
+                          <Download className="h-3.5 w-3.5 mr-1" />
+                        )}
+                        {downloadingJobId === job.id ? "Downloading..." : "Download"}
                       </Button>
                     )}
                     {(job.status === "failed" || job.status === "cancelled") && (
