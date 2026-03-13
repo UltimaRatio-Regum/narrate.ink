@@ -1,6 +1,7 @@
 import { useState, useRef } from "react";
-import { Play, Pause, Volume2, Clock, Cpu, FileAudio } from "lucide-react";
+import { Play, Pause, Volume2, Clock, Cpu, FileAudio, Download, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/hooks/use-toast";
 import type { ProjectAudioFile } from "@shared/schema";
 
 interface ProjectAudioListProps {
@@ -19,7 +20,9 @@ function formatDuration(seconds: number): string {
 }
 
 function AudioFileEntry({ audio, projectId }: { audio: ProjectAudioFile; projectId: string }) {
+  const { toast } = useToast();
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
   const audioRef = useRef<HTMLAudioElement>(null);
 
   const togglePlay = () => {
@@ -32,20 +35,58 @@ function AudioFileEntry({ audio, projectId }: { audio: ProjectAudioFile; project
     setIsPlaying(!isPlaying);
   };
 
+  const handleDownload = async () => {
+    setIsDownloading(true);
+    try {
+      const response = await fetch(`/api/projects/${projectId}/audio/${audio.id}`, {
+        credentials: "include",
+      });
+      if (!response.ok) throw new Error("Download failed");
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const label = audio.label?.replace(/[^a-zA-Z0-9_\- ]/g, "") || "audio";
+      a.download = `${label}.wav`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast({ title: "Download failed", description: "Could not download audio segment", variant: "destructive" });
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
   const audioUrl = `/api/projects/${projectId}/audio/${audio.id}`;
   const isCombined = audio.scopeType !== "chunk";
 
   return (
     <div className="flex items-center gap-3 p-3 rounded-lg border bg-card" data-testid={`audio-entry-${audio.id}`}>
-      <Button
-        variant="outline"
-        size="sm"
-        className="h-8 w-8 p-0 shrink-0"
-        onClick={togglePlay}
-        data-testid={`button-play-${audio.id}`}
-      >
-        {isPlaying ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
-      </Button>
+      <div className="flex items-center gap-1 shrink-0">
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 w-8 p-0"
+          onClick={togglePlay}
+          data-testid={`button-play-${audio.id}`}
+        >
+          {isPlaying ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-8 w-8 p-0"
+          onClick={handleDownload}
+          disabled={isDownloading}
+          data-testid={`button-download-segment-${audio.id}`}
+        >
+          {isDownloading ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Download className="h-3.5 w-3.5" />
+          )}
+        </Button>
+      </div>
 
       <audio
         ref={audioRef}
