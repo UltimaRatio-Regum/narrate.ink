@@ -1,8 +1,7 @@
 import { useState } from "react";
-import { Upload, Sliders, List, Settings, BookOpen, Users, LogOut, Key, Shield } from "lucide-react";
+import { Sparkles, List, Settings, BookOpen, Users, LogOut, Key, Shield } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { BeginnerTab } from "@/components/BeginnerTab";
-import { AdvancedTab } from "@/components/AdvancedTab";
+import { ProjectWizardTab } from "@/components/ProjectWizardTab";
 import { JobsPanel } from "@/components/JobsPanel";
 import { SettingsTab } from "@/components/SettingsTab";
 import { ProjectsListPanel } from "@/components/ProjectsListPanel";
@@ -22,18 +21,17 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-type TabValue = "beginner" | "advanced" | "jobs" | "settings" | "projects" | "users";
+type TabValue = "wizard" | "jobs" | "settings" | "projects" | "users";
 
 export default function Home() {
   const { user, logout } = useAuth();
   const isAdmin = user?.userType === "administrator";
-  const [activeTab, setActiveTab] = useState<TabValue>("beginner");
+  const [activeTab, setActiveTab] = useState<TabValue>("wizard");
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [showChangePassword, setShowChangePassword] = useState(false);
 
   const tabs = [
-    { value: "beginner" as const, label: "Beginner", icon: Upload },
-    { value: "advanced" as const, label: "Advanced", icon: Sliders },
+    { value: "wizard" as const, label: "Project Wizard", icon: Sparkles },
     { value: "projects" as const, label: "Projects", icon: BookOpen },
     { value: "jobs" as const, label: "Jobs", icon: List },
     { value: "settings" as const, label: "Settings", icon: Settings },
@@ -46,6 +44,11 @@ export default function Home() {
 
   const handleBackToList = () => {
     setEditingProjectId(null);
+  };
+
+  const handleWizardProjectCreated = (projectId: string) => {
+    setActiveTab("projects");
+    setEditingProjectId(projectId);
   };
 
   return (
@@ -97,7 +100,7 @@ export default function Home() {
 
       <main className="container mx-auto px-4 py-6">
         <div className="w-full">
-          <div className={cn("grid w-full max-w-xl mx-auto mb-6 p-1 bg-muted rounded-lg", isAdmin ? "grid-cols-6" : "grid-cols-5")}>
+          <div className={cn("grid w-full max-w-xl mx-auto mb-6 p-1 bg-muted rounded-lg", isAdmin ? "grid-cols-5" : "grid-cols-4")}>
             {tabs.map((tab) => (
               <button
                 key={tab.value}
@@ -121,12 +124,8 @@ export default function Home() {
             ))}
           </div>
 
-          <div className={cn(activeTab === "beginner" ? "block" : "hidden")}>
-            <BeginnerTab />
-          </div>
-
-          <div className={cn(activeTab === "advanced" ? "block" : "hidden")}>
-            <AdvancedTab />
+          <div className={cn(activeTab === "wizard" ? "block" : "hidden")}>
+            <ProjectWizardTab onProjectCreated={handleWizardProjectCreated} />
           </div>
 
           <div className={cn(activeTab === "projects" ? "block" : "hidden")}>

@@ -13,9 +13,9 @@ VoxLibris is a web application that transforms plain text into expressive audiob
 ### Frontend (React + TypeScript)
 - **Framework**: React with TypeScript, styled with Tailwind CSS and Shadcn/ui components.
 - **State Management**: TanStack Query for server state; Wouter for routing.
-- **UI/UX Decisions**: Five-tab layout (Beginner, Advanced, Projects, Jobs, Settings); wizard-style generation flow (Upload → Analyzing → Voice Selection → Generate); real-time progress updates; dark mode support.
+- **UI/UX Decisions**: Four-tab layout (Project Wizard, Projects, Jobs, Settings) + admin-only Users tab; wizard-style generation flow (Upload → Analyzing → Voice Selection → Generate); real-time progress updates; dark mode support.
+- **Project Wizard Tab**: Guided four-step wizard (Upload → Analyzing → Voice Selection → Generate) that creates a real project behind the scenes, runs LLM segmentation, lets the user assign voices (single or per-character), then starts audio generation and navigates to the project editor.
 - **Projects Tab**: Manages audiobook projects, supporting text/EPUB imports. Features a two-panel editor for hierarchical content (Book → Chapters → Sections → Chunks), allowing settings overrides and audio generation at various levels. Includes audiobook metadata editing, cover image upload, and export options (single MP3, MP3 per chapter ZIP, M4B with chapters). Speaker voice assignment and a "Speaker Inspector Dialog" for managing and merging speakers are integrated.
-- **Advanced Tab**: Provides text input, preview, generation settings (engine, intensity, pause), and voice assignment (narrator + detected speakers).
 - **Settings Tab**: Configures default TTS engine/voice, manages custom voices, sets emotion prosody weights, allows registration/management of external TTS engines, and provides an editable parsing/speaker-identification prompt for customizing LLM text analysis behavior.
 - **TTS Engine Configuration**: Centralized management of built-in (Edge TTS, Soprano) and remote TTS engines, supporting dynamic registration and integration into voice selection.
 
