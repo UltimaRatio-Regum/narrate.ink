@@ -145,9 +145,25 @@ export function JobsPanel({ onPlayAudio }: JobsPanelProps) {
     }
   };
 
-  const downloadJobAudio = (jobId: string) => {
+  const downloadJobAudio = async (jobId: string) => {
     const maxSilenceMs = localStorage.getItem("voxlibris-max-silence-ms") || "300";
-    window.open(`/api/jobs/${jobId}/audio?max_silence_ms=${maxSilenceMs}`, "_blank");
+    try {
+      const response = await fetch(`/api/jobs/${jobId}/audio?max_silence_ms=${maxSilenceMs}`, {
+        credentials: "include",
+      });
+      if (!response.ok) throw new Error("Download failed");
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const disposition = response.headers.get("content-disposition");
+      const match = disposition?.match(/filename="?(.+?)"?$/);
+      a.download = match?.[1] || `job-${jobId}.wav`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast({ title: "Download failed", description: "Could not download audio", variant: "destructive" });
+    }
   };
 
   useEffect(() => {

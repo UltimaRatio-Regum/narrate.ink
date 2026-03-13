@@ -162,10 +162,26 @@ export function ProjectDetailPanel({ selection, project, onRefresh }: ProjectDet
   const currentStats = audioStats[currentScopeId];
   const hasAnyAudio = currentStats && currentStats.withAudio > 0;
 
-  const handleDownload = () => {
+  const handleDownload = async () => {
     const scope = selection.type === "project" ? "project" : selection.type;
     const scopeId = selection.type === "project" ? "" : selection.id;
-    window.open(`/api/projects/${project.id}/download?scope=${scope}&scopeId=${scopeId}`, "_blank");
+    try {
+      const response = await fetch(`/api/projects/${project.id}/download?scope=${scope}&scopeId=${scopeId}`, {
+        credentials: "include",
+      });
+      if (!response.ok) throw new Error("Download failed");
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const disposition = response.headers.get("content-disposition");
+      const match = disposition?.match(/filename="?(.+?)"?$/);
+      a.download = match?.[1] || `${project.title || "audiobook"}.${project.outputFormat === "m4b" ? "m4b" : "mp3"}`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast({ title: "Download failed", description: "Could not download audio", variant: "destructive" });
+    }
   };
 
   return (
