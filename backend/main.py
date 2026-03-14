@@ -36,7 +36,7 @@ from database import (
     AppSetting, TTSJob, JobStatus,
 )
 from remote_tts_client import RemoteTTSClient
-from project_segmenter import segment_project_background, split_into_sections, _call_llm_for_section
+from project_segmenter import segment_project_background, split_into_sections, _call_llm_for_section, rechunk_section
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -2100,6 +2100,7 @@ def _serialize_project_full(project: Project, db) -> dict:
                 "title": sec.title,
                 "status": sec.status,
                 "errorMessage": sec.error_message,
+                "hasRawText": sec.raw_text is not None and len(sec.raw_text) > 0,
                 "chunks": chunks_data,
             })
 
@@ -2623,6 +2624,30 @@ async def segment_project(project_id: str, req: FastAPIRequest, request: Optiona
 
     segment_project_background(project_id, model=model)
     return {"success": True, "message": "Segmentation started"}
+
+
+class RechunkSectionRequest(BaseModel):
+    model: Optional[str] = None
+
+
+@app.post("/projects/{project_id}/sections/{section_id}/rechunk")
+async def rechunk_section_endpoint(project_id: str, section_id: str, req: FastAPIRequest, request: Optional[RechunkSectionRequest] = None):
+    user_id, user_role = _get_user_info(req)
+    model = request.model if request and request.model else "openai/gpt-4.1-mini"
+    db = get_db_session()
+    try:
+        _require_project_access(db, user_id, user_role, project_id)
+    finally:
+        db.close()
+
+    try:
+        result = await rechunk_section(project_id, section_id, model=model)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Re-chunk failed for section {section_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 def _build_segment_data(chunk, chapter, tts_engine, narrator_voice_id, speakers):

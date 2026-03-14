@@ -377,15 +377,19 @@ def _split_section_by_chunk_count(db, section, max_chunks: int = MAX_CHUNKS_PER_
     for i in range(0, len(chunks), max_chunks):
         chunk_groups.append(chunks[i:i + max_chunks])
 
+    if chunk_groups:
+        section.raw_text = "\n".join(c.text for c in chunk_groups[0])
     new_sections.append(section)
 
     base_section_index = section.section_index
 
     for group_idx, group in enumerate(chunk_groups[1:], start=1):
+        split_raw_text = "\n".join(c.text for c in group) if group else None
         new_section = ProjectSection(
             id=str(uuid.uuid4()),
             chapter_id=section.chapter_id,
             section_index=base_section_index + group_idx,
+            raw_text=split_raw_text,
             status="segmented",
         )
         db.add(new_section)
@@ -485,6 +489,133 @@ def _generate_section_titles(db, chapter_id: str, model: str = "openai/gpt-4.1-m
         logger.warning(f"Failed to generate section titles: {e}")
 
 
+async def rechunk_section(project_id: str, section_id: str, model: str = DEFAULT_MODEL):
+    """Re-chunk a single section using the same context the LLM had during original segmentation."""
+    base_url = os.environ.get("AI_INTEGRATIONS_OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+    api_key = os.environ.get("AI_INTEGRATIONS_OPENROUTER_API_KEY", "")
+
+    if not api_key:
+        raise ValueError("OpenRouter API key not configured")
+
+    db = get_db_session()
+    try:
+        section = db.query(ProjectSection).filter(ProjectSection.id == section_id).first()
+        if not section:
+            raise ValueError("Section not found")
+
+        chapter = db.query(ProjectChapter).filter(ProjectChapter.id == section.chapter_id).first()
+        if not chapter or chapter.project_id != project_id:
+            raise ValueError("Section does not belong to this project")
+
+        section_text = section.raw_text
+        if not section_text:
+            raise ValueError("Section has no raw text stored — it was created before this feature was added. Please re-segment the entire project.")
+
+        known_speakers: list[str] = []
+        context = ""
+
+        all_chapters = db.query(ProjectChapter).filter(
+            ProjectChapter.project_id == project_id
+        ).order_by(ProjectChapter.chapter_index).all()
+
+        for ch in all_chapters:
+            if ch.chapter_index > chapter.chapter_index:
+                break
+            ch_sections = db.query(ProjectSection).filter(
+                ProjectSection.chapter_id == ch.id,
+            ).order_by(ProjectSection.section_index).all()
+            for sec in ch_sections:
+                if ch.id == chapter.id and sec.section_index >= section.section_index:
+                    break
+                chunks = db.query(ProjectChunk).filter(
+                    ProjectChunk.section_id == sec.id
+                ).order_by(ProjectChunk.chunk_index).all()
+                for chunk in chunks:
+                    speaker = chunk.speaker_override or chunk.speaker
+                    if speaker and speaker not in known_speakers:
+                        known_speakers.append(speaker)
+                if sec.raw_text:
+                    context = sec.raw_text[-500:] if len(sec.raw_text) > 500 else sec.raw_text
+
+        section.status = "processing"
+        section.error_message = None
+        db.commit()
+
+        max_attempts = 3
+        last_error = None
+
+        async with httpx.AsyncClient() as client:
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    result = await _call_llm_for_section(
+                        client, section_text, known_speakers,
+                        context, model, base_url, api_key
+                    )
+
+                    db.query(ProjectChunk).filter(ProjectChunk.section_id == section.id).delete()
+                    db.flush()
+
+                    chunk_idx = 0
+                    new_speakers = []
+                    for speaker in result.get("detectedSpeakers", []):
+                        if speaker and speaker not in known_speakers:
+                            new_speakers.append(speaker)
+
+                    for seg in result.get("segments", []):
+                        seg_text = seg.get("text", "")
+                        seg_type = seg.get("type", "narration")
+                        seg_speaker = seg.get("speaker")
+                        emotion = seg.get("emotion", seg.get("sentiment", "neutral"))
+                        if emotion not in CANONICAL_EMOTIONS:
+                            emotion = "neutral"
+
+                        sub_texts = _rechunk_segment(seg_text)
+                        for st in sub_texts:
+                            wc = len(st.split())
+                            chunk = ProjectChunk(
+                                id=str(uuid.uuid4()),
+                                section_id=section.id,
+                                chunk_index=chunk_idx,
+                                text=st,
+                                segment_type=seg_type,
+                                speaker=seg_speaker,
+                                emotion=emotion,
+                                word_count=wc,
+                                approx_duration_seconds=round(wc / WORDS_PER_SECOND, 1),
+                            )
+                            db.add(chunk)
+                            chunk_idx += 1
+
+                    section.status = "segmented"
+                    section.error_message = None
+                    db.commit()
+
+                    _split_section_by_chunk_count(db, section)
+                    _reindex_sections(db, chapter.id)
+
+                    last_error = None
+                    return {"success": True, "chunksCreated": chunk_idx, "newSpeakers": new_speakers}
+
+                except Exception as e:
+                    last_error = e
+                    db.rollback()
+                    db.query(ProjectChunk).filter(ProjectChunk.section_id == section.id).delete()
+                    db.commit()
+                    if attempt < max_attempts:
+                        logger.warning(f"Re-chunk attempt {attempt}/{max_attempts} failed for section {section_id}: {e}. Retrying...")
+                        await asyncio.sleep(1)
+                    else:
+                        logger.error(f"All {max_attempts} re-chunk attempts failed for section {section_id}: {e}")
+
+        section.status = "failed"
+        section.error_message = f"Re-chunk failed after {max_attempts} attempts: {last_error}"
+        db.commit()
+        raise ValueError(f"Re-chunk failed after {max_attempts} attempts: {last_error}")
+
+    finally:
+        db.close()
+
+
 def segment_project_background(project_id: str, model: str = DEFAULT_MODEL):
     thread = threading.Thread(
         target=_run_segmentation_wrapper,
@@ -548,61 +679,78 @@ async def _run_segmentation(project_id: str, model: str):
                             id=str(uuid.uuid4()),
                             chapter_id=chapter.id,
                             section_index=sec_idx,
+                            raw_text=section_text,
                             status="processing",
                         )
                         db.add(section)
                         db.commit()
 
-                        chunk_section_index = 0
+                        max_attempts = 3
+                        last_error = None
 
-                        try:
-                            result = await _call_llm_for_section(
-                                client, section_text, all_known_speakers,
-                                context, model, base_url, api_key
-                            )
+                        for attempt in range(1, max_attempts + 1):
+                            chunk_section_index = 0
+                            try:
+                                result = await _call_llm_for_section(
+                                    client, section_text, all_known_speakers,
+                                    context, model, base_url, api_key
+                                )
 
-                            for speaker in result.get("detectedSpeakers", []):
-                                if speaker and speaker not in all_known_speakers:
-                                    all_known_speakers.append(speaker)
+                                for speaker in result.get("detectedSpeakers", []):
+                                    if speaker and speaker not in all_known_speakers:
+                                        all_known_speakers.append(speaker)
 
-                            for seg in result.get("segments", []):
-                                seg_text = seg.get("text", "")
-                                seg_type = seg.get("type", "narration")
-                                seg_speaker = seg.get("speaker")
-                                emotion = seg.get("emotion", seg.get("sentiment", "neutral"))
-                                if emotion not in CANONICAL_EMOTIONS:
-                                    emotion = "neutral"
+                                for seg in result.get("segments", []):
+                                    seg_text = seg.get("text", "")
+                                    seg_type = seg.get("type", "narration")
+                                    seg_speaker = seg.get("speaker")
+                                    emotion = seg.get("emotion", seg.get("sentiment", "neutral"))
+                                    if emotion not in CANONICAL_EMOTIONS:
+                                        emotion = "neutral"
 
-                                sub_texts = _rechunk_segment(seg_text)
+                                    sub_texts = _rechunk_segment(seg_text)
 
-                                for st in sub_texts:
-                                    wc = len(st.split())
-                                    chunk = ProjectChunk(
-                                        id=str(uuid.uuid4()),
-                                        section_id=section.id,
-                                        chunk_index=chunk_section_index,
-                                        text=st,
-                                        segment_type=seg_type,
-                                        speaker=seg_speaker,
-                                        emotion=emotion,
-                                        word_count=wc,
-                                        approx_duration_seconds=round(wc / WORDS_PER_SECOND, 1),
-                                    )
-                                    db.add(chunk)
-                                    chunk_section_index += 1
+                                    for st in sub_texts:
+                                        wc = len(st.split())
+                                        chunk = ProjectChunk(
+                                            id=str(uuid.uuid4()),
+                                            section_id=section.id,
+                                            chunk_index=chunk_section_index,
+                                            text=st,
+                                            segment_type=seg_type,
+                                            speaker=seg_speaker,
+                                            emotion=emotion,
+                                            word_count=wc,
+                                            approx_duration_seconds=round(wc / WORDS_PER_SECOND, 1),
+                                        )
+                                        db.add(chunk)
+                                        chunk_section_index += 1
 
-                            context = section_text[-500:] if len(section_text) > 500 else section_text
+                                context = section_text[-500:] if len(section_text) > 500 else section_text
 
-                            section.status = "segmented"
-                            db.commit()
+                                section.status = "segmented"
+                                section.error_message = None
+                                db.commit()
 
-                            result_sections = _split_section_by_chunk_count(db, section)
-                            all_chapter_sections.extend(result_sections)
+                                result_sections = _split_section_by_chunk_count(db, section)
+                                all_chapter_sections.extend(result_sections)
+                                last_error = None
+                                break
 
-                        except Exception as e:
-                            logger.error(f"Failed to segment section {sec_idx} of chapter {chapter.chapter_index}: {e}")
+                            except Exception as e:
+                                last_error = e
+                                db.rollback()
+                                db.query(ProjectChunk).filter(ProjectChunk.section_id == section.id).delete()
+                                db.commit()
+                                if attempt < max_attempts:
+                                    logger.warning(f"Attempt {attempt}/{max_attempts} failed for section {sec_idx} of chapter {chapter.chapter_index}: {e}. Retrying...")
+                                    await asyncio.sleep(1)
+                                else:
+                                    logger.error(f"All {max_attempts} attempts failed for section {sec_idx} of chapter {chapter.chapter_index}: {e}")
+
+                        if last_error is not None:
                             section.status = "failed"
-                            section.error_message = str(e)
+                            section.error_message = f"Failed after {max_attempts} attempts: {last_error}"
                             db.commit()
                             all_chapter_sections.append(section)
 

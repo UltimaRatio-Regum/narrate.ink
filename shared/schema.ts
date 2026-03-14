@@ -272,6 +272,7 @@ export const projectSectionSchema = z.object({
   title: z.string().nullable().optional(),
   status: z.string(),
   errorMessage: z.string().nullable(),
+  hasRawText: z.boolean().default(false),
   chunks: z.array(projectChunkSchema).optional(),
 });
 export type ProjectSection = z.infer<typeof projectSectionSchema>;

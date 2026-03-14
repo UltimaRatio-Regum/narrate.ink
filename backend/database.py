@@ -288,6 +288,7 @@ class ProjectSection(Base):
     chapter_id = Column(String, ForeignKey("project_chapters.id", ondelete="CASCADE"), nullable=False)
     section_index = Column(Integer, nullable=False)
     title = Column(String, nullable=True)
+    raw_text = Column(Text, nullable=True)
     status = Column(String, nullable=False, default="pending")
     error_message = Column(Text, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
@@ -361,6 +362,7 @@ def _migrate_columns(db_engine):
         ("voice_library", "is_shared", "ALTER TABLE voice_library ADD COLUMN is_shared BOOLEAN NOT NULL DEFAULT true"),
         ("tts_jobs", "user_id", "ALTER TABLE tts_jobs ADD COLUMN user_id VARCHAR REFERENCES users(id)"),
         ("projects", "narrator_speed", "ALTER TABLE projects ADD COLUMN narrator_speed FLOAT NOT NULL DEFAULT 1.0"),
+        ("project_sections", "raw_text", "ALTER TABLE project_sections ADD COLUMN raw_text TEXT"),
     ]
     
     with db_engine.connect() as conn:

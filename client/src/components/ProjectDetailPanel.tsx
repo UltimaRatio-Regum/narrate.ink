@@ -213,7 +213,7 @@ export function ProjectDetailPanel({ selection, project, onRefresh }: ProjectDet
       )}
 
       {selection.type === "section" && (
-        <SectionDetailPanel section={selection.data as ProjectSection} />
+        <SectionDetailPanel section={selection.data as ProjectSection} project={project} onRefresh={onRefresh} />
       )}
 
       {selection.type === "chunk" && (
@@ -1098,9 +1098,28 @@ function ChapterDetailPanel({
   );
 }
 
-function SectionDetailPanel({ section }: { section: ProjectSection }) {
+function SectionDetailPanel({ section, project, onRefresh }: { section: ProjectSection; project: ProjectData; onRefresh: () => void }) {
+  const { toast } = useToast();
+  const [rechunkModel, setRechunkModel] = useState(DEFAULT_MODEL.id);
   const chunks = section.chunks || [];
   const totalWords = chunks.reduce((sum, c) => sum + (c.wordCount || 0), 0);
+
+  const rechunkMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", `/api/projects/${project.id}/sections/${section.id}/rechunk`, {
+        model: rechunkModel,
+      });
+      return res.json();
+    },
+    onSuccess: (data) => {
+      toast({ title: "Re-chunk complete", description: `Created ${data.chunksCreated} chunks` });
+      onRefresh();
+    },
+    onError: (error: Error) => {
+      toast({ title: "Re-chunk failed", description: error.message, variant: "destructive" });
+      onRefresh();
+    },
+  });
 
   return (
     <div className="space-y-4">
@@ -1111,10 +1130,53 @@ function SectionDetailPanel({ section }: { section: ProjectSection }) {
         </h2>
         <Badge variant="outline">{section.status}</Badge>
       </div>
+      {section.title && (
+        <p className="text-sm text-muted-foreground">{section.title}</p>
+      )}
       <div className="flex gap-4 text-sm text-muted-foreground">
         <span>{chunks.length} chunks</span>
         <span>{totalWords} words</span>
       </div>
+      {section.errorMessage && (
+        <div className="text-sm text-red-500 bg-red-50 dark:bg-red-950/30 p-2 rounded">
+          {section.errorMessage}
+        </div>
+      )}
+
+      {section.hasRawText && (
+        <div className="space-y-2 pt-2">
+          <h3 className="text-sm font-semibold">Re-chunk Section</h3>
+          <p className="text-xs text-muted-foreground">
+            Re-analyze this section with the LLM to regenerate chunks and speaker assignments. Existing chunks will be replaced.
+          </p>
+          <div className="flex items-center gap-2">
+            <Select value={rechunkModel} onValueChange={setRechunkModel}>
+              <SelectTrigger data-testid="select-rechunk-model" className="h-9 flex-1">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {LLM_MODELS.map((m) => (
+                  <SelectItem key={m.id} value={m.id}>{m.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => rechunkMutation.mutate()}
+              disabled={rechunkMutation.isPending}
+              data-testid="button-rechunk-section"
+            >
+              {rechunkMutation.isPending ? (
+                <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+              ) : (
+                <RefreshCw className="h-3.5 w-3.5 mr-1" />
+              )}
+              {rechunkMutation.isPending ? "Re-chunking..." : "Re-chunk"}
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
