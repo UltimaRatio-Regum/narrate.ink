@@ -2,7 +2,8 @@ import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { 
   Clock, Play, Pause, Trash2, X, RefreshCw, CheckCircle, AlertCircle, 
-  Loader2, Download, ChevronDown, ChevronRight, Volume2, RotateCcw
+  Loader2, Download, ChevronDown, ChevronRight, Volume2, RotateCcw,
+  ChevronLeft
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,6 +14,15 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import type { TTSJob, TTSSegmentStatus } from "@shared/schema";
 
+const PAGE_SIZE = 20;
+
+interface JobsResponse {
+  jobs: TTSJob[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 interface JobsPanelProps {
   onPlayAudio?: (url: string) => void;
 }
@@ -22,14 +32,22 @@ export function JobsPanel({ onPlayAudio }: JobsPanelProps) {
   const queryClient = useQueryClient();
   const [expandedJob, setExpandedJob] = useState<string | null>(null);
   const [playingSegment, setPlayingSegment] = useState<string | null>(null);
+  const [page, setPage] = useState(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  const { data: jobsData, isLoading } = useQuery<{ jobs: TTSJob[] }>({
-    queryKey: ["/api/jobs"],
+  const { data: jobsData, isLoading } = useQuery<JobsResponse>({
+    queryKey: ["/api/jobs", { limit: PAGE_SIZE, offset: page * PAGE_SIZE }],
+    queryFn: async () => {
+      const res = await fetch(`/api/jobs?limit=${PAGE_SIZE}&offset=${page * PAGE_SIZE}`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch jobs");
+      return res.json();
+    },
     refetchInterval: 2000,
   });
 
   const jobs = jobsData?.jobs ?? [];
+  const totalJobs = jobsData?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(totalJobs / PAGE_SIZE));
 
   const hasFinishedJobs = jobs.some(j => 
     j.status === "completed" || j.status === "failed" || j.status === "cancelled"
@@ -43,12 +61,16 @@ export function JobsPanel({ onPlayAudio }: JobsPanelProps) {
 
   const segments = segmentsData?.segments ?? [];
 
+  const invalidateJobs = () => {
+    queryClient.invalidateQueries({ queryKey: ["/api/jobs"] });
+  };
+
   const cancelMutation = useMutation({
     mutationFn: async (jobId: string) => {
       await apiRequest("POST", `/api/jobs/${jobId}/cancel`);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/jobs"] });
+      invalidateJobs();
       toast({ title: "Job cancelled" });
     },
   });
@@ -58,7 +80,7 @@ export function JobsPanel({ onPlayAudio }: JobsPanelProps) {
       await apiRequest("DELETE", `/api/jobs/${jobId}`);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/jobs"] });
+      invalidateJobs();
       toast({ title: "Job deleted" });
     },
   });
@@ -68,7 +90,7 @@ export function JobsPanel({ onPlayAudio }: JobsPanelProps) {
       await apiRequest("POST", `/api/jobs/${jobId}/retry`);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/jobs"] });
+      invalidateJobs();
       toast({ title: "Job retrying", description: "Failed segments will be re-processed." });
     },
     onError: (error: Error) => {
@@ -82,7 +104,10 @@ export function JobsPanel({ onPlayAudio }: JobsPanelProps) {
       return res.json();
     },
     onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/jobs"] });
+      invalidateJobs();
+      if (page > 0 && jobs.length <= (data.deleted || 0)) {
+        setPage(0);
+      }
       toast({ title: "Jobs cleared", description: `Removed ${data.deleted} finished job${data.deleted !== 1 ? 's' : ''}.` });
     },
   });
@@ -181,7 +206,7 @@ export function JobsPanel({ onPlayAudio }: JobsPanelProps) {
     };
   }, []);
 
-  if (jobs.length === 0 && !isLoading) {
+  if (totalJobs === 0 && !isLoading) {
     return null;
   }
 
@@ -192,6 +217,9 @@ export function JobsPanel({ onPlayAudio }: JobsPanelProps) {
           <CardTitle className="text-base flex items-center gap-2">
             <RefreshCw className="h-4 w-4" />
             Generation Jobs
+            {totalJobs > 0 && (
+              <Badge variant="secondary" className="text-xs ml-1" data-testid="badge-jobs-total">{totalJobs}</Badge>
+            )}
           </CardTitle>
           <div className="flex items-center gap-2">
             {hasFinishedJobs && (
@@ -374,6 +402,39 @@ export function JobsPanel({ onPlayAudio }: JobsPanelProps) {
               </Collapsible>
             ))}
         </div>
+
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between pt-3 mt-3 border-t">
+            <span className="text-xs text-muted-foreground" data-testid="text-jobs-count">
+              {totalJobs} job{totalJobs !== 1 ? "s" : ""} total
+            </span>
+            <div className="flex items-center gap-1">
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 w-7 p-0"
+                onClick={() => setPage(p => Math.max(0, p - 1))}
+                disabled={page === 0}
+                data-testid="button-jobs-prev-page"
+              >
+                <ChevronLeft className="h-3.5 w-3.5" />
+              </Button>
+              <span className="text-xs px-2" data-testid="text-jobs-page">
+                {page + 1} / {totalPages}
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 w-7 p-0"
+                onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}
+                disabled={page >= totalPages - 1}
+                data-testid="button-jobs-next-page"
+              >
+                <ChevronRight className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          </div>
+        )}
       </CardContent>
     </Card>
   );

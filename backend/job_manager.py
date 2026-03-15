@@ -105,8 +105,8 @@ def get_job(job_id: str) -> Optional[Dict[str, Any]]:
         db.close()
 
 
-def get_all_jobs(include_completed: bool = True, limit: int = 50, user_id: str = None, user_role: str = "user") -> List[Dict[str, Any]]:
-    """Get all jobs, optionally filtering out completed ones."""
+def get_all_jobs(include_completed: bool = True, limit: int = 20, offset: int = 0, user_id: str = None, user_role: str = "user") -> Dict[str, Any]:
+    """Get all jobs with pagination, optionally filtering out completed ones."""
     db = get_db_session()
     try:
         query = db.query(TTSJob).order_by(TTSJob.created_at.desc())
@@ -118,9 +118,11 @@ def get_all_jobs(include_completed: bool = True, limit: int = 50, user_id: str =
             ]))
         if user_id and user_role != "administrator":
             query = query.filter(TTSJob.user_id == user_id)
-        jobs = query.limit(limit).all()
         
-        return [
+        total = query.count()
+        jobs = query.offset(offset).limit(limit).all()
+        
+        jobs_list = [
             {
                 "id": job.id,
                 "title": job.title,
@@ -138,6 +140,7 @@ def get_all_jobs(include_completed: bool = True, limit: int = 50, user_id: str =
             }
             for job in jobs
         ]
+        return {"jobs": jobs_list, "total": total, "limit": limit, "offset": offset}
     finally:
         db.close()
 
