@@ -9,7 +9,6 @@ import "highlight.js/styles/github-dark.css";
 import { Search, BookOpen, ChevronRight, ChevronDown, ArrowLeft, Menu, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import logoHorizontal from "@assets/vl_full_logo_horizontal.png";
@@ -146,7 +145,7 @@ function DocsSidebar({
           />
         </div>
       </div>
-      <ScrollArea className="flex-1">
+      <div className="flex-1 overflow-y-auto">
         <nav className="p-3 space-y-1" data-testid="docs-sidebar-nav">
           {sortedCategories.map((category) => {
             const isCollapsed = collapsedCategories.has(category);
@@ -192,7 +191,7 @@ function DocsSidebar({
             );
           })}
         </nav>
-      </ScrollArea>
+      </div>
       <div className="p-3 border-t">
         <a href="/" className="block">
           <Button variant="ghost" size="sm" className="w-full justify-start gap-2" data-testid="link-back-to-app">
@@ -296,7 +295,9 @@ function MarkdownRenderer({
             );
           },
         }}
-      />
+      >
+        {content}
+      </ReactMarkdown>
     </div>
   );
 }
