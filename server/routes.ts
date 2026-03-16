@@ -267,21 +267,32 @@ export async function registerRoutes(
   function getDocsManifest() {
     if (!fs.existsSync(DOCS_DIR)) return [];
     const files = fs.readdirSync(DOCS_DIR).filter(f => f.endsWith('.md'));
-    return files.map(filename => {
+    interface DocManifestEntry {
+      slug: string;
+      filename: string;
+      title: string;
+      description: string;
+      category: string;
+      order: number;
+      keywords: string[];
+    }
+    const entries: DocManifestEntry[] = [];
+    for (const filename of files) {
       const raw = fs.readFileSync(path.join(DOCS_DIR, filename), 'utf-8');
       const { data } = matter(raw);
-      if (!data.title) return null;
+      if (!data.title) continue;
       const slug = filename.replace(/^\d+-/, '').replace(/\.md$/, '');
-      return {
+      entries.push({
         slug,
         filename,
-        title: data.title,
-        description: data.description || '',
-        category: data.category || 'General',
-        order: data.order || 99,
-        keywords: data.keywords || [],
-      };
-    }).filter(Boolean).sort((a: any, b: any) => a.order - b.order);
+        title: data.title as string,
+        description: (data.description as string) || '',
+        category: (data.category as string) || 'General',
+        order: (data.order as number) || 99,
+        keywords: (data.keywords as string[]) || [],
+      });
+    }
+    return entries.sort((a, b) => a.order - b.order);
   }
 
   app.get('/api/docs/manifest', (_req: Request, res: Response) => {
