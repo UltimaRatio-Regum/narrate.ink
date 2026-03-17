@@ -1,5 +1,6 @@
 import io
 import logging
+import math
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -50,6 +51,17 @@ def create_export_job(project_id: str, export_format: str, user_id: str) -> dict
     return result
 
 
+def _set_progress(job, db, total_chunks: int, pct: float, message: str):
+    job.total_segments = total_chunks
+    job.completed_segments = round(pct * total_chunks)
+    job.error_message = message
+    job.updated_at = datetime.utcnow()
+    try:
+        db.commit()
+    except Exception as exc:
+        logger.debug(f"Export progress commit failed: {exc}")
+
+
 def _run_export(job_id: str):
     db = get_db_session()
     try:
@@ -89,11 +101,7 @@ def _run_export(job_id: str):
             chapter_chunk_ids.append((ch.title or f"Chapter {ch.chapter_index + 1}", chunk_ids))
             total_chunk_count += len(chunk_ids)
 
-        job.total_segments = 1000
-        job.completed_segments = 0
-        job.error_message = f"Gathering chunks from DB (0 of {total_chunk_count})..."
-        job.updated_at = datetime.utcnow()
-        db.commit()
+        _set_progress(job, db, total_chunk_count, 0.0, f"Gathering chunks from DB (0 of {total_chunk_count})...")
 
         chapter_audio = []
         gathered_count = 0
@@ -109,10 +117,8 @@ def _run_export(job_id: str):
                     blobs.append(af.audio_data)
 
                 gathered_count += 1
-                job.completed_segments = int(gathered_count / max(total_chunk_count, 1) * 150)
-                job.error_message = f"Gathering chunks from DB ({gathered_count} of {total_chunk_count})..."
-                job.updated_at = datetime.utcnow()
-                db.commit()
+                pct = (gathered_count / max(total_chunk_count, 1)) * 0.15
+                _set_progress(job, db, total_chunk_count, pct, f"Gathering chunks from DB ({gathered_count} of {total_chunk_count})...")
 
             chapter_audio.append((ch_title, blobs))
 
@@ -124,20 +130,20 @@ def _run_export(job_id: str):
             db.commit()
             return
 
-        job.completed_segments = 150
-        job.error_message = f"Decoding chunks for processing (0 of {total_blobs})..."
-        job.updated_at = datetime.utcnow()
-        db.commit()
+        total_merge_levels = max(1, math.ceil(math.log2(max(total_blobs, 1))))
 
-        def _export_progress(fraction: float, message: str):
-            clamped = max(0.0, min(1.0, fraction))
-            job.completed_segments = 150 + int(clamped * 850)
-            job.error_message = message
-            job.updated_at = datetime.utcnow()
-            try:
-                db.commit()
-            except Exception as exc:
-                logger.debug(f"Export progress commit failed: {exc}")
+        _set_progress(job, db, total_chunk_count, 0.15, f"Decoding chunks for processing (0 of {total_blobs})...")
+
+        def _export_progress(phase: str, current: int, total: int, message: str):
+            if phase == "decode":
+                pct = 0.15 + (current / max(total, 1)) * 0.45
+            elif phase == "merge":
+                pct = 0.60 + (current / max(total, 1)) * 0.15
+            elif phase == "encode":
+                pct = 0.75 + (current / max(total, 1)) * 0.25
+            else:
+                pct = 0.0
+            _set_progress(job, db, total_chunk_count, min(pct, 1.0), message)
 
         cover = project.meta_cover_image if project.meta_cover_image else None
         pause_ms = int(project.pause_duration) if project.pause_duration else 500
@@ -191,7 +197,8 @@ def _run_export(job_id: str):
 
         job.output_audio_file_id = audio_file.id
         job.status = JobStatus.COMPLETED.value
-        job.completed_segments = 1000
+        job.completed_segments = total_chunk_count
+        job.total_segments = total_chunk_count
         job.error_message = None
         job.updated_at = datetime.utcnow()
         db.commit()
