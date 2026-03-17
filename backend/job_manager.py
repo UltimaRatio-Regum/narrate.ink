@@ -259,42 +259,67 @@ def cancel_job(job_id: str) -> bool:
 
 
 def delete_job(job_id: str) -> bool:
-    """Delete a job and its segments."""
+    """Delete a job and its segments using bulk SQL to avoid loading blobs."""
     cancel_job(job_id)
     
     db = get_db_session()
     try:
         job = db.query(TTSJob).filter(TTSJob.id == job_id).first()
-        if job:
-            db.delete(job)
-            db.commit()
-            
-            job_dir = os.path.join(TTS_OUTPUT_DIR, job_id)
-            if os.path.exists(job_dir):
-                import shutil
-                shutil.rmtree(job_dir)
-            
-            return True
-        return False
+        if not job:
+            return False
+
+        export_audio_id = getattr(job, 'output_audio_file_id', None)
+
+        db.query(TTSSegment).filter(TTSSegment.job_id == job_id).delete(synchronize_session=False)
+
+        db.delete(job)
+
+        if export_audio_id:
+            from database import ProjectAudioFile
+            db.query(ProjectAudioFile).filter(ProjectAudioFile.id == export_audio_id).delete(synchronize_session=False)
+
+        db.commit()
+
+        job_dir = os.path.join(TTS_OUTPUT_DIR, job_id)
+        if os.path.exists(job_dir):
+            import shutil
+            shutil.rmtree(job_dir)
+
+        return True
     finally:
         db.close()
 
 
 async def cleanup_old_jobs(max_age_hours: int = 24):
-    """Clean up jobs older than max_age_hours."""
+    """Clean up jobs older than max_age_hours using bulk deletion."""
     db = get_db_session()
     try:
         cutoff = datetime.utcnow() - timedelta(hours=max_age_hours)
         old_jobs = db.query(TTSJob).filter(TTSJob.created_at < cutoff).all()
-        
+
+        if not old_jobs:
+            return
+
+        job_ids = [job.id for job in old_jobs]
+        export_audio_ids = [job.output_audio_file_id for job in old_jobs if getattr(job, 'output_audio_file_id', None)]
+
+        db.query(TTSSegment).filter(TTSSegment.job_id.in_(job_ids)).delete(synchronize_session=False)
+
         for job in old_jobs:
-            job_dir = os.path.join(TTS_OUTPUT_DIR, job.id)
+            db.delete(job)
+
+        if export_audio_ids:
+            from database import ProjectAudioFile
+            db.query(ProjectAudioFile).filter(ProjectAudioFile.id.in_(export_audio_ids)).delete(synchronize_session=False)
+
+        db.commit()
+
+        for jid in job_ids:
+            job_dir = os.path.join(TTS_OUTPUT_DIR, jid)
             if os.path.exists(job_dir):
                 import shutil
-                shutil.rmtree(job_dir)
-            db.delete(job)
-        
-        db.commit()
+                shutil.rmtree(job_dir, ignore_errors=True)
+
         logger.info(f"Cleaned up {len(old_jobs)} old jobs")
     finally:
         db.close()

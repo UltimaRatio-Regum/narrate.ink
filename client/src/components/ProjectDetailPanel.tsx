@@ -232,7 +232,7 @@ export function ProjectDetailPanel({ selection, project, onRefresh }: ProjectDet
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-semibold">Audio Generation</h3>
           <div className="flex items-center gap-2">
-            {hasAnyAudio && (
+            {hasAnyAudio && selection.type !== "project" && (
               <Button
                 size="sm"
                 variant="outline"

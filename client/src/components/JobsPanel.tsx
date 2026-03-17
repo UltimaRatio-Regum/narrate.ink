@@ -210,10 +210,6 @@ export function JobsPanel({ onPlayAudio }: JobsPanelProps) {
     };
   }, []);
 
-  if (totalJobs === 0 && !isLoading) {
-    return null;
-  }
-
   return (
     <Card data-testid="jobs-panel">
       <CardHeader className="pb-3">
@@ -249,6 +245,12 @@ export function JobsPanel({ onPlayAudio }: JobsPanelProps) {
       </CardHeader>
       <CardContent>
         <div className="space-y-3">
+          {jobs.length === 0 && !isLoading && (
+            <div className="text-center py-8 text-muted-foreground" data-testid="text-no-jobs">
+              <p className="text-sm">No jobs yet</p>
+              <p className="text-xs mt-1">Export a project to see progress here</p>
+            </div>
+          )}
             {jobs.map((job) => (
               <Collapsible
                 key={job.id}
@@ -282,7 +284,7 @@ export function JobsPanel({ onPlayAudio }: JobsPanelProps) {
                         <span>{job.errorMessage || "Waiting — engine is busy with another job"}</span>
                       </div>
                     )}
-                    {job.status === "processing" && job.errorMessage && job.completedSegments === 0 && (
+                    {job.status === "processing" && job.errorMessage && job.completedSegments === 0 && job.jobType !== "export" && (
                       <div className="flex items-center gap-2 text-xs text-amber-600 dark:text-amber-400 mb-1" data-testid={`job-wakeup-${job.id}`}>
                         <Loader2 className="h-3 w-3 animate-spin" />
                         <span>{job.errorMessage}</span>
@@ -294,9 +296,11 @@ export function JobsPanel({ onPlayAudio }: JobsPanelProps) {
                         {job.jobType === "export"
                           ? (job.status === "completed"
                               ? "Export ready"
-                              : job.totalSegments > 0
-                                ? `${job.completedSegments}/${job.totalSegments} chapters`
-                                : "Preparing...")
+                              : job.errorMessage && job.status === "processing"
+                                ? job.errorMessage
+                                : job.totalSegments > 0
+                                  ? "Preparing..."
+                                  : "Preparing...")
                           : `${job.completedSegments}/${job.totalSegments} segments`
                         }
                       </span>

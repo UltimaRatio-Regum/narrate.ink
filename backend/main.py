@@ -1220,7 +1220,8 @@ async def generate_audio_stream(request: GenerateRequest):
 from database import init_database
 from job_manager import (
     create_job, get_job, get_all_jobs, get_job_segments, 
-    get_segment_audio, cancel_job, delete_job, run_cleanup_loop
+    get_segment_audio, cancel_job, delete_job, run_cleanup_loop,
+    TTS_OUTPUT_DIR,
 )
 from job_runner import start_job_async
 
@@ -1371,19 +1372,46 @@ async def get_segment_audio_endpoint(job_id: str, segment_id: str, request: Fast
 
 @app.post("/jobs/clear-completed")
 async def clear_completed_jobs():
-    """Delete all finished jobs (completed, failed, cancelled)."""
+    """Delete all finished jobs (completed, failed, cancelled) using bulk operations."""
+    from sqlalchemy import text
     db = get_db_session()
     try:
         finished = db.query(TTSJob).filter(
             TTSJob.status.in_([JobStatus.COMPLETED.value, JobStatus.FAILED.value, JobStatus.CANCELLED.value])
         ).all()
-        ids = [j.id for j in finished]
+        if not finished:
+            return {"deleted": 0}
+
+        job_ids = [j.id for j in finished]
+        export_audio_ids = [j.output_audio_file_id for j in finished if getattr(j, 'output_audio_file_id', None)]
+
+        for jid in job_ids:
+            cancel_job(jid)
+
+        from database import TTSSegment
+        db.query(TTSSegment).filter(TTSSegment.job_id.in_(job_ids)).delete(synchronize_session=False)
+
+        for job in finished:
+            db.delete(job)
+
+        if export_audio_ids:
+            db.query(ProjectAudioFile).filter(ProjectAudioFile.id.in_(export_audio_ids)).delete(synchronize_session=False)
+
+        db.commit()
+
+        for jid in job_ids:
+            job_dir = os.path.join(TTS_OUTPUT_DIR, jid)
+            if os.path.exists(job_dir):
+                import shutil
+                shutil.rmtree(job_dir, ignore_errors=True)
+
+        return {"deleted": len(job_ids)}
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error clearing completed jobs: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         db.close()
-
-    for jid in ids:
-        delete_job(jid)
-    return {"deleted": len(ids)}
 
 
 @app.post("/jobs/{job_id}/cancel")

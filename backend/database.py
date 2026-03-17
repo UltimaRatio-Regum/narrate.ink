@@ -12,7 +12,7 @@ from enum import Enum
 import bcrypt
 from sqlalchemy import (
     Column, String, Integer, Float, DateTime, Text, ForeignKey, 
-    Enum as SQLEnum, LargeBinary, Boolean, JSON, create_engine
+    Enum as SQLEnum, LargeBinary, Boolean, JSON, Index, create_engine
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
@@ -103,7 +103,7 @@ class FileChapter(Base):
     __tablename__ = "file_chapters"
     
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    upload_id = Column(String, ForeignKey("file_uploads.id", ondelete="CASCADE"), nullable=False)
+    upload_id = Column(String, ForeignKey("file_uploads.id", ondelete="CASCADE"), nullable=False, index=True)
     chapter_index = Column(Integer, nullable=False)
     title = Column(String, nullable=True)
     raw_text = Column(Text, nullable=False)
@@ -123,7 +123,7 @@ class TTSJob(Base):
     
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     title = Column(String, nullable=False, default="Untitled")
-    status = Column(String, nullable=False, default=JobStatus.PENDING.value)
+    status = Column(String, nullable=False, default=JobStatus.PENDING.value, index=True)
     total_segments = Column(Integer, nullable=False, default=0)
     completed_segments = Column(Integer, nullable=False, default=0)
     failed_segments = Column(Integer, nullable=False, default=0)
@@ -148,7 +148,7 @@ class TTSSegment(Base):
     __tablename__ = "tts_segments"
     
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    job_id = Column(String, ForeignKey("tts_jobs.id", ondelete="CASCADE"), nullable=False)
+    job_id = Column(String, ForeignKey("tts_jobs.id", ondelete="CASCADE"), nullable=False, index=True)
     segment_index = Column(Integer, nullable=False)
     text = Column(Text, nullable=False)
     segment_type = Column(String, nullable=False, default="narration")
@@ -269,7 +269,7 @@ class ProjectChapter(Base):
     __tablename__ = "project_chapters"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    project_id = Column(String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
     chapter_index = Column(Integer, nullable=False)
     title = Column(String, nullable=True)
     raw_text = Column(Text, nullable=False)
@@ -289,7 +289,7 @@ class ProjectSection(Base):
     __tablename__ = "project_sections"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    chapter_id = Column(String, ForeignKey("project_chapters.id", ondelete="CASCADE"), nullable=False)
+    chapter_id = Column(String, ForeignKey("project_chapters.id", ondelete="CASCADE"), nullable=False, index=True)
     section_index = Column(Integer, nullable=False)
     title = Column(String, nullable=True)
     raw_text = Column(Text, nullable=True)
@@ -306,7 +306,7 @@ class ProjectChunk(Base):
     __tablename__ = "project_chunks"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    section_id = Column(String, ForeignKey("project_sections.id", ondelete="CASCADE"), nullable=False)
+    section_id = Column(String, ForeignKey("project_sections.id", ondelete="CASCADE"), nullable=False, index=True)
     chunk_index = Column(Integer, nullable=False)
     text = Column(Text, nullable=False)
     segment_type = Column(String, nullable=False, default="narration")
@@ -324,9 +324,12 @@ class ProjectChunk(Base):
 
 class ProjectAudioFile(Base):
     __tablename__ = "project_audio_files"
+    __table_args__ = (
+        Index("ix_project_audio_scope", "project_id", "scope_type", "scope_id"),
+    )
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    project_id = Column(String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
     scope_type = Column(String, nullable=False)
     scope_id = Column(String, nullable=False)
     audio_data = Column(LargeBinary, nullable=False)
@@ -387,6 +390,43 @@ def _migrate_columns(db_engine):
                 except Exception:
                     pass
                 logger.debug(f"Migration skipped for {table_name}.{column_name}: {e}")
+
+    _create_indexes(db_engine, inspector)
+
+
+def _create_indexes(db_engine, inspector):
+    """Create indexes on FK columns for existing databases."""
+    from sqlalchemy import text
+
+    index_defs = [
+        ("ix_tts_segments_job_id", "tts_segments", "job_id"),
+        ("ix_tts_jobs_status", "tts_jobs", "status"),
+        ("ix_file_chapters_upload_id", "file_chapters", "upload_id"),
+        ("ix_project_chapters_project_id", "project_chapters", "project_id"),
+        ("ix_project_sections_chapter_id", "project_sections", "chapter_id"),
+        ("ix_project_chunks_section_id", "project_chunks", "section_id"),
+        ("ix_project_audio_files_project_id", "project_audio_files", "project_id"),
+        ("ix_project_audio_scope", "project_audio_files", "project_id, scope_type, scope_id"),
+    ]
+
+    with db_engine.connect() as conn:
+        existing_tables = inspector.get_table_names()
+        for idx_name, table_name, columns in index_defs:
+            if table_name not in existing_tables:
+                continue
+            existing_indexes = {idx["name"] for idx in inspector.get_indexes(table_name) if idx.get("name")}
+            if idx_name in existing_indexes:
+                continue
+            try:
+                conn.execute(text(f"CREATE INDEX IF NOT EXISTS {idx_name} ON {table_name} ({columns})"))
+                conn.commit()
+                logger.info(f"Created index {idx_name} on {table_name}({columns})")
+            except Exception as e:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                logger.debug(f"Index creation skipped for {idx_name}: {e}")
 
 
 def _assign_orphaned_records(session):

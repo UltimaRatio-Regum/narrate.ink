@@ -73,8 +73,10 @@ def _run_export(job_id: str):
             ProjectChapter.project_id == project.id
         ).order_by(ProjectChapter.chapter_index).all()
 
-        job.total_segments = len(chapters)
+        num_chapters = len(chapters)
+        job.total_segments = 1000
         job.completed_segments = 0
+        job.error_message = "Gathering chapters..."
         job.updated_at = datetime.utcnow()
         db.commit()
 
@@ -103,7 +105,7 @@ def _run_export(job_id: str):
 
             chapter_audio.append((ch.title or f"Chapter {ch.chapter_index + 1}", blobs))
 
-            job.completed_segments = ch_idx + 1
+            job.completed_segments = int((ch_idx + 1) / max(num_chapters, 1) * 200)
             job.updated_at = datetime.utcnow()
             db.commit()
 
@@ -115,9 +117,28 @@ def _run_export(job_id: str):
             db.commit()
             return
 
-        job.error_message = "Encoding audio..."
+        job.completed_segments = 200
+        job.error_message = "Building audio..."
         job.updated_at = datetime.utcnow()
         db.commit()
+
+        _phase_thresholds = [
+            (0.50, "Building audio..."),
+            (1.00, "Encoding audio..."),
+        ]
+
+        def _export_progress(fraction: float):
+            clamped = max(0.0, min(1.0, fraction))
+            job.completed_segments = 200 + int(clamped * 800)
+            for threshold, label in _phase_thresholds:
+                if clamped <= threshold:
+                    job.error_message = label
+                    break
+            job.updated_at = datetime.utcnow()
+            try:
+                db.commit()
+            except Exception as exc:
+                logger.debug(f"Export progress commit failed: {exc}")
 
         cover = project.meta_cover_image if project.meta_cover_image else None
         pause_ms = int(project.pause_duration) if project.pause_duration else 500
@@ -132,6 +153,7 @@ def _run_export(job_id: str):
             year=project.meta_year,
             description=project.meta_description,
             cover_image=cover,
+            progress_callback=_export_progress,
         )
 
         export_format = job.export_format or "mp3"
@@ -170,6 +192,7 @@ def _run_export(job_id: str):
 
         job.output_audio_file_id = audio_file.id
         job.status = JobStatus.COMPLETED.value
+        job.completed_segments = 1000
         job.error_message = None
         job.updated_at = datetime.utcnow()
         db.commit()
