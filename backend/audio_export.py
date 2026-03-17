@@ -3,13 +3,14 @@ Audio export module for generating downloadable audiobook files.
 Supports: single MP3, MP3 per chapter (ZIP), and M4B (AAC with chapters).
 """
 import io
+import math
 import os
 import struct
 import subprocess
 import tempfile
 import zipfile
 import logging
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Callable
 
 from pydub import AudioSegment
 from mutagen.mp3 import MP3
@@ -19,6 +20,8 @@ from mutagen.id3 import (
 from mutagen.mp4 import MP4, MP4Cover
 
 logger = logging.getLogger(__name__)
+
+ProgressCallback = Callable[[float, str], None]
 
 
 def _pairwise_merge(segments: List[AudioSegment]) -> AudioSegment:
@@ -94,14 +97,19 @@ def _apply_id3_tags(
 def _build_mp3_segment_with_progress(
     audio_blobs: List[bytes],
     pause_ms: int = 500,
-    progress_callback: Optional[callable] = None,
+    progress_callback: Optional[ProgressCallback] = None,
     progress_start: float = 0.0,
     progress_end: float = 1.0,
+    decode_weight: float = 0.6,
+    total_blob_label: Optional[int] = None,
+    blob_offset: int = 0,
 ) -> AudioSegment:
     silence = AudioSegment.silent(duration=pause_ms) if pause_ms > 0 else None
     total = max(len(audio_blobs), 1)
+    display_total = total_blob_label if total_blob_label is not None else total
+
     decode_range = progress_end - progress_start
-    decode_end = progress_start + decode_range * 0.6
+    decode_end = progress_start + decode_range * decode_weight
     merge_start = decode_end
 
     decoded: List[AudioSegment] = []
@@ -113,17 +121,17 @@ def _build_mp3_segment_with_progress(
             decoded.append(seg)
         except Exception as e:
             logger.warning(f"Skipping invalid audio blob (index {i}): {e}")
-        if progress_callback and (i + 1) % max(1, total // 20) == 0:
+        if progress_callback:
             frac = progress_start + (decode_end - progress_start) * ((i + 1) / total)
-            progress_callback(frac)
+            current_num = blob_offset + i + 1
+            progress_callback(frac, f"Decoding chunks for processing ({current_num} of {display_total})...")
 
     if progress_callback:
-        progress_callback(decode_end)
+        progress_callback(decode_end, f"Decoding chunks for processing ({display_total} of {display_total})...")
 
     if len(decoded) == 0:
         return AudioSegment.empty()
 
-    import math
     total_rounds = max(1, math.ceil(math.log2(len(decoded))))
     current_round = 0
     segments = decoded
@@ -144,11 +152,12 @@ def _build_mp3_segment_with_progress(
         segments = merged
         current_round += 1
         if progress_callback:
+            merge_pct = round(current_round / total_rounds * 100)
             frac = merge_start + (progress_end - merge_start) * (current_round / total_rounds)
-            progress_callback(min(frac, progress_end))
+            progress_callback(min(frac, progress_end), f"Merging chunks ({merge_pct}% complete)...")
 
     if progress_callback:
-        progress_callback(progress_end)
+        progress_callback(progress_end, "Merging chunks (100% complete)...")
 
     return segments[0]
 
@@ -163,21 +172,36 @@ def export_single_mp3(
     year: Optional[str] = None,
     description: Optional[str] = None,
     cover_image: Optional[bytes] = None,
-    progress_callback: Optional[callable] = None,
+    progress_callback: Optional[ProgressCallback] = None,
 ) -> bytes:
     all_blobs = []
     for _ch_title, blobs in chapter_audio:
         all_blobs.extend(blobs)
 
+    total_blobs = len(all_blobs)
+
+    encode_start = 0.706
+
     if progress_callback:
-        progress_callback(0.0)
-    combined = _build_mp3_segment_with_progress(all_blobs, pause_ms, progress_callback, 0.0, 0.5)
+        progress_callback(0.0, f"Decoding chunks for processing (0 of {total_blobs})...")
+
+    combined = _build_mp3_segment_with_progress(
+        all_blobs, pause_ms, progress_callback,
+        progress_start=0.0,
+        progress_end=encode_start,
+        decode_weight=0.75,
+        total_blob_label=total_blobs,
+        blob_offset=0,
+    )
+
     if progress_callback:
-        progress_callback(0.5)
+        progress_callback(encode_start, "Encoding audio...")
+
     buf = io.BytesIO()
     combined.export(buf, format="mp3", bitrate="192k")
+
     if progress_callback:
-        progress_callback(0.9)
+        progress_callback(0.95, "Applying metadata tags...")
     mp3_bytes = buf.getvalue()
 
     result = _apply_id3_tags(
@@ -186,7 +210,7 @@ def export_single_mp3(
         cover_image=cover_image, album=title,
     )
     if progress_callback:
-        progress_callback(1.0)
+        progress_callback(1.0, "Complete")
     return result
 
 
@@ -200,22 +224,31 @@ def export_mp3_per_chapter(
     year: Optional[str] = None,
     description: Optional[str] = None,
     cover_image: Optional[bytes] = None,
-    progress_callback: Optional[callable] = None,
+    progress_callback: Optional[ProgressCallback] = None,
 ) -> bytes:
     valid_chapters = [(ch_title, blobs) for ch_title, blobs in chapter_audio if blobs]
     total_chapters = max(1, len(valid_chapters))
+    total_blobs = sum(len(blobs) for _, blobs in valid_chapters)
+    encode_start = 0.706
 
+    blob_offset = 0
     built_segments = []
     for ci, (ch_title, blobs) in enumerate(valid_chapters):
-        ch_start = (ci / total_chapters) * 0.5
-        ch_end = ((ci + 1) / total_chapters) * 0.5
-        combined = _build_mp3_segment_with_progress(blobs, pause_ms, progress_callback, ch_start, ch_end)
+        ch_start = (ci / total_chapters) * encode_start
+        ch_end = ((ci + 1) / total_chapters) * encode_start
+        combined = _build_mp3_segment_with_progress(
+            blobs, pause_ms, progress_callback, ch_start, ch_end,
+            decode_weight=0.75,
+            total_blob_label=total_blobs,
+            blob_offset=blob_offset,
+        )
         built_segments.append((ch_title, combined))
+        blob_offset += len(blobs)
         if progress_callback:
-            progress_callback(ch_end)
+            progress_callback(ch_end, f"Building chapter {ci + 1} of {total_chapters}...")
 
     if progress_callback:
-        progress_callback(0.5)
+        progress_callback(encode_start, "Encoding chapters...")
 
     zip_buf = io.BytesIO()
     with zipfile.ZipFile(zip_buf, 'w', zipfile.ZIP_DEFLATED) as zf:
@@ -241,7 +274,8 @@ def export_mp3_per_chapter(
             )
             zf.writestr(filename, tagged)
             if progress_callback:
-                progress_callback(0.5 + 0.5 * ((ci + 1) / total_chapters))
+                encode_frac = encode_start + (1.0 - encode_start) * ((ci + 1) / total_chapters)
+                progress_callback(encode_frac, f"Encoding chapter {ci + 1} of {total_chapters}...")
 
     return zip_buf.getvalue()
 
@@ -274,23 +308,30 @@ def export_m4b(
     year: Optional[str] = None,
     description: Optional[str] = None,
     cover_image: Optional[bytes] = None,
-    progress_callback: Optional[callable] = None,
+    progress_callback: Optional[ProgressCallback] = None,
 ) -> bytes:
     tmp_dir = tempfile.mkdtemp(prefix="m4b_export_")
+    total_blobs = sum(len(blobs) for _, blobs in chapter_audio if blobs)
     try:
         chapter_files = []
         chapter_meta = []
         cumulative_ms = 0
         total_ch = max(1, sum(1 for _, blobs in chapter_audio if blobs))
         built_count = 0
+        blob_offset = 0
 
         for i, (ch_title, blobs) in enumerate(chapter_audio):
             if not blobs:
                 continue
 
-            ch_start = (built_count / total_ch) * 0.35
-            ch_end = ((built_count + 1) / total_ch) * 0.35
-            combined = _build_mp3_segment_with_progress(blobs, pause_ms, progress_callback, ch_start, ch_end)
+            ch_start = (built_count / total_ch) * 0.60
+            ch_end = ((built_count + 1) / total_ch) * 0.60
+            combined = _build_mp3_segment_with_progress(
+                blobs, pause_ms, progress_callback, ch_start, ch_end,
+                decode_weight=0.75,
+                total_blob_label=total_blobs,
+                blob_offset=blob_offset,
+            )
             wav_path = os.path.join(tmp_dir, f"ch_{i:03d}.wav")
             combined.export(wav_path, format="wav")
 
@@ -303,14 +344,15 @@ def export_m4b(
             cumulative_ms += duration_ms
             chapter_files.append(wav_path)
             built_count += 1
+            blob_offset += len(blobs)
             if progress_callback:
-                progress_callback(ch_end)
+                progress_callback(ch_end, f"Building chapter {built_count} of {total_ch}...")
 
         if not chapter_files:
             raise ValueError("No audio data to export")
 
         if progress_callback:
-            progress_callback(0.35)
+            progress_callback(0.60, "Concatenating chapters...")
 
         concat_wav = os.path.join(tmp_dir, "full.wav")
         if len(chapter_files) == 1:
@@ -321,14 +363,15 @@ def export_m4b(
             for wi, wf in enumerate(chapter_files):
                 wav_segments.append(AudioSegment.from_wav(wf))
                 if progress_callback:
-                    progress_callback(0.35 + 0.10 * ((wi + 1) / total_wavs))
+                    frac = 0.60 + 0.10 * ((wi + 1) / total_wavs)
+                    progress_callback(frac, f"Loading chapter WAVs ({wi + 1} of {total_wavs})...")
             full = _pairwise_merge(wav_segments)
             if progress_callback:
-                progress_callback(0.48)
+                progress_callback(0.73, "Merging WAV files...")
             full.export(concat_wav, format="wav")
 
         if progress_callback:
-            progress_callback(0.50)
+            progress_callback(0.75, "Encoding audio...")
 
         m4b_path = os.path.join(tmp_dir, "output.m4b")
 
@@ -386,7 +429,7 @@ def export_m4b(
                         frac = min(t / total_duration_s, 1.0)
                         if frac > last_frac:
                             last_frac = frac
-                            progress_callback(0.50 + frac * 0.50)
+                            progress_callback(0.75 + frac * 0.25, "Encoding audio...")
             proc.wait(timeout=300)
         except subprocess.TimeoutExpired:
             proc.kill()

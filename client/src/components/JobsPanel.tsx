@@ -42,7 +42,11 @@ export function JobsPanel({ onPlayAudio }: JobsPanelProps) {
       if (!res.ok) throw new Error("Failed to fetch jobs");
       return res.json();
     },
-    refetchInterval: 2000,
+    refetchInterval: (query) => {
+      const data = query.state.data as JobsResponse | undefined;
+      const hasActiveJob = data?.jobs?.some(j => j.status === "processing" || j.status === "pending");
+      return hasActiveJob ? 500 : 2000;
+    },
   });
 
   const jobs = jobsData?.jobs ?? [];

@@ -73,15 +73,9 @@ def _run_export(job_id: str):
             ProjectChapter.project_id == project.id
         ).order_by(ProjectChapter.chapter_index).all()
 
-        num_chapters = len(chapters)
-        job.total_segments = 1000
-        job.completed_segments = 0
-        job.error_message = "Gathering chapters..."
-        job.updated_at = datetime.utcnow()
-        db.commit()
-
-        chapter_audio = []
-        for ch_idx, ch in enumerate(chapters):
+        total_chunk_count = 0
+        chapter_chunk_ids = []
+        for ch in chapters:
             sections = db.query(ProjectSection).filter(
                 ProjectSection.chapter_id == ch.id
             ).order_by(ProjectSection.section_index).all()
@@ -92,7 +86,18 @@ def _run_export(job_id: str):
                     ProjectChunk.section_id == sec.id
                 ).order_by(ProjectChunk.chunk_index).all()
                 chunk_ids.extend([c.id for c in chunks])
+            chapter_chunk_ids.append((ch.title or f"Chapter {ch.chapter_index + 1}", chunk_ids))
+            total_chunk_count += len(chunk_ids)
 
+        job.total_segments = 1000
+        job.completed_segments = 0
+        job.error_message = f"Gathering chunks from DB (0 of {total_chunk_count})..."
+        job.updated_at = datetime.utcnow()
+        db.commit()
+
+        chapter_audio = []
+        gathered_count = 0
+        for ch_title, chunk_ids in chapter_chunk_ids:
             blobs = []
             for cid in chunk_ids:
                 af = db.query(ProjectAudioFile).filter(
@@ -103,11 +108,13 @@ def _run_export(job_id: str):
                 if af and af.audio_data:
                     blobs.append(af.audio_data)
 
-            chapter_audio.append((ch.title or f"Chapter {ch.chapter_index + 1}", blobs))
+                gathered_count += 1
+                job.completed_segments = int(gathered_count / max(total_chunk_count, 1) * 150)
+                job.error_message = f"Gathering chunks from DB ({gathered_count} of {total_chunk_count})..."
+                job.updated_at = datetime.utcnow()
+                db.commit()
 
-            job.completed_segments = int((ch_idx + 1) / max(num_chapters, 1) * 200)
-            job.updated_at = datetime.utcnow()
-            db.commit()
+            chapter_audio.append((ch_title, blobs))
 
         total_blobs = sum(len(blobs) for _, blobs in chapter_audio)
         if total_blobs == 0:
@@ -117,23 +124,15 @@ def _run_export(job_id: str):
             db.commit()
             return
 
-        job.completed_segments = 200
-        job.error_message = "Building audio..."
+        job.completed_segments = 150
+        job.error_message = f"Decoding chunks for processing (0 of {total_blobs})..."
         job.updated_at = datetime.utcnow()
         db.commit()
 
-        _phase_thresholds = [
-            (0.50, "Building audio..."),
-            (1.00, "Encoding audio..."),
-        ]
-
-        def _export_progress(fraction: float):
+        def _export_progress(fraction: float, message: str):
             clamped = max(0.0, min(1.0, fraction))
-            job.completed_segments = 200 + int(clamped * 800)
-            for threshold, label in _phase_thresholds:
-                if clamped <= threshold:
-                    job.error_message = label
-                    break
+            job.completed_segments = 150 + int(clamped * 850)
+            job.error_message = message
             job.updated_at = datetime.utcnow()
             try:
                 db.commit()
