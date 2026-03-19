@@ -15,7 +15,7 @@ from collections import defaultdict, Counter
 import numpy as np
 from pydub import AudioSegment
 
-from database import JobStatus, SegmentStatus, get_db_session, TTSJob, TTSSegment, CustomVoice, TTSEngineEndpoint, VoiceLibraryEntry, ProjectAudioFile
+from database import JobStatus, SegmentStatus, get_db_session, TTSJob, TTSSegment, CustomVoice, TTSEngineEndpoint, VoiceLibraryEntry, ProjectAudioFile, AppSetting
 from job_manager import (
     update_job_status, update_segment_status, 
     TTS_OUTPUT_DIR, active_jobs, _cancel_tokens
@@ -29,8 +29,34 @@ logger = logging.getLogger(__name__)
 executor = ThreadPoolExecutor(max_workers=2)
 
 _engine_guard = threading.Lock()
-_engine_busy: Dict[str, bool] = {}
+_engine_active: Dict[str, int] = defaultdict(int)
 _engine_queues: Dict[str, List[str]] = defaultdict(list)
+_engine_concurrency_cache: Dict[str, int] = {}
+
+
+def _get_engine_max_parallel(engine: str) -> int:
+    """Return the configured max parallel jobs for an engine (default 1). Cached in-process."""
+    if engine in _engine_concurrency_cache:
+        return _engine_concurrency_cache[engine]
+    db = get_db_session()
+    try:
+        setting = db.query(AppSetting).filter(AppSetting.key == "engine_concurrency").first()
+        if setting and setting.value:
+            data = json.loads(setting.value)
+            value = max(1, int(data.get(engine, 1)))
+        else:
+            value = 1
+    except Exception:
+        value = 1
+    finally:
+        db.close()
+    _engine_concurrency_cache[engine] = value
+    return value
+
+
+def invalidate_engine_concurrency_cache():
+    """Clear the in-process concurrency cache so the next job picks up new DB values."""
+    _engine_concurrency_cache.clear()
 
 
 def _start_next_for_engine(engine: str):
@@ -45,10 +71,11 @@ def _start_next_for_engine(engine: str):
                     continue
             finally:
                 db.close()
-            _engine_busy[engine] = True
+            # Transfer the finishing job's slot directly to the next queued job — no count change.
             _launch_job_thread(next_job_id, engine)
             return
-        _engine_busy[engine] = False
+        # No queued jobs: release the slot.
+        _engine_active[engine] = max(0, _engine_active[engine] - 1)
 
 
 def _apply_emotion_smoothing(segment_data: List[Dict[str, Any]], config: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -789,7 +816,7 @@ def _launch_job_thread(job_id: str, engine: str):
 
 
 def start_job_async(job_id: str):
-    """Start processing a job, or queue it if the engine is busy."""
+    """Start processing a job, or queue it if the engine is at capacity."""
     db = get_db_session()
     try:
         job = db.query(TTSJob).filter(TTSJob.id == job_id).first()
@@ -801,13 +828,15 @@ def start_job_async(job_id: str):
         db.close()
 
     with _engine_guard:
-        if not _engine_busy.get(engine, False):
-            _engine_busy[engine] = True
-            logger.info(f"Engine '{engine}' is free — starting job {job_id} immediately")
+        max_parallel = _get_engine_max_parallel(engine)
+        active = _engine_active[engine]
+        if active < max_parallel:
+            _engine_active[engine] += 1
+            logger.info(f"Engine '{engine}' has capacity ({active + 1}/{max_parallel}) — starting job {job_id} immediately")
             _launch_job_thread(job_id, engine)
         else:
-            logger.info(f"Engine '{engine}' is busy — job {job_id} queued as waiting")
-            update_job_status(job_id, JobStatus.WAITING, error_message=f"Waiting — engine '{engine}' is busy with another job")
+            logger.info(f"Engine '{engine}' at capacity ({active}/{max_parallel}) — job {job_id} queued")
+            update_job_status(job_id, JobStatus.WAITING, error_message=f"Waiting — engine '{engine}' is at capacity ({active}/{max_parallel})")
             _engine_queues[engine].append(job_id)
 
 

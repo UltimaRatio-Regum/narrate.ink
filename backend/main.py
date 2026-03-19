@@ -2013,6 +2013,57 @@ async def update_parsing_prompt(request: ParsingPromptRequest):
         db.close()
 
 
+ENGINE_CONCURRENCY_SETTING_KEY = "engine_concurrency"
+
+
+@app.get("/engine-concurrency")
+async def get_engine_concurrency():
+    """Return the max-parallel-jobs map keyed by engine_id."""
+    db = get_db_session()
+    try:
+        setting = db.query(AppSetting).filter(AppSetting.key == ENGINE_CONCURRENCY_SETTING_KEY).first()
+        if setting and setting.value:
+            return {"concurrency": json.loads(setting.value)}
+        return {"concurrency": {}}
+    finally:
+        db.close()
+
+
+class EngineConcurrencyRequest(BaseModel):
+    concurrency: dict
+
+
+@app.post("/engine-concurrency")
+async def update_engine_concurrency(request: EngineConcurrencyRequest, req: FastAPIRequest):
+    """Save the max-parallel-jobs map. Administrator only."""
+    _, user_role = _get_user_info(req)
+    if user_role != "administrator":
+        raise HTTPException(status_code=403, detail="Administrator access required")
+
+    concurrency = {k: max(1, int(v)) for k, v in request.concurrency.items()}
+
+    db = get_db_session()
+    try:
+        setting = db.query(AppSetting).filter(AppSetting.key == ENGINE_CONCURRENCY_SETTING_KEY).first()
+        if setting:
+            setting.value = json.dumps(concurrency)
+        else:
+            setting = AppSetting(key=ENGINE_CONCURRENCY_SETTING_KEY, value=json.dumps(concurrency))
+            db.add(setting)
+        db.commit()
+
+        from job_runner import invalidate_engine_concurrency_cache
+        invalidate_engine_concurrency_cache()
+
+        return {"success": True}
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to save engine concurrency: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
+
 TTS_SETTINGS_FILE = Path(__file__).parent.parent / "tts_settings.json"
 
 def load_tts_settings():

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Save, RotateCcw, Volume2, Gauge, Music, Zap, Plus, Trash2, RefreshCw, Play, Pause, Upload, Server, Mic, Pencil } from "lucide-react";
+import { Save, RotateCcw, Volume2, Gauge, Music, Zap, Plus, Trash2, RefreshCw, Play, Pause, Upload, Server, Mic, Pencil, Layers } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -450,6 +450,13 @@ export function SettingsTab() {
     queryKey: ["/api/parsing-prompt"],
   });
 
+  const { data: engineConcurrencyData } = useQuery<{ concurrency: Record<string, number> }>({
+    queryKey: ["/api/engine-concurrency"],
+    enabled: isAdmin,
+  });
+
+  const [concurrencySettings, setConcurrencySettings] = useState<Record<string, number>>({});
+
   useEffect(() => {
     if (!parsingPromptLoaded && savedPromptData) {
       setParsingPromptText(savedPromptData.prompt || "");
@@ -477,6 +484,12 @@ export function SettingsTab() {
     }
   }, [prosodyData, localProsody]);
 
+  useEffect(() => {
+    if (engineConcurrencyData) {
+      setConcurrencySettings(engineConcurrencyData.concurrency || {});
+    }
+  }, [engineConcurrencyData]);
+
   const saveProsodyMutation = useMutation({
     mutationFn: async (settings: ProsodySettings) => {
       const response = await apiRequest("POST", "/api/prosody-settings", {
@@ -490,6 +503,20 @@ export function SettingsTab() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/prosody-settings"] });
       toast({ title: "Settings saved", description: "Prosody settings updated successfully" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to save", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const saveConcurrencyMutation = useMutation({
+    mutationFn: async (settings: Record<string, number>) => {
+      const response = await apiRequest("POST", "/api/engine-concurrency", { concurrency: settings });
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/engine-concurrency"] });
+      toast({ title: "Concurrency settings saved", description: "Changes will apply to newly queued jobs." });
     },
     onError: (error: Error) => {
       toast({ title: "Failed to save", description: error.message, variant: "destructive" });
@@ -940,6 +967,56 @@ export function SettingsTab() {
           )}
         </CardContent>
       </Card>
+
+      {isAdmin && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Layers className="h-5 w-5" />
+              Engine Concurrency
+            </CardTitle>
+            <CardDescription>
+              Maximum number of jobs sent to each engine simultaneously. Default is 1 (serial).
+              Increase to better utilize GPU capacity on engines that support parallel inference.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {[
+              ...TTS_ENGINES.map(e => ({ id: e.id, name: e.name })),
+              ...(registeredEngines ?? []).map(e => ({ id: e.engine_id, name: e.engine_name })),
+            ].map(({ id, name }) => (
+              <div key={id} className="flex items-center gap-4">
+                <Label className="w-48 shrink-0 text-sm">{name}</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  max={16}
+                  className="w-24"
+                  value={concurrencySettings[id] ?? 1}
+                  onChange={(e) => {
+                    const v = Math.max(1, parseInt(e.target.value, 10) || 1);
+                    setConcurrencySettings(prev => ({ ...prev, [id]: v }));
+                  }}
+                  data-testid={`input-concurrency-${id}`}
+                />
+                <span className="text-xs text-muted-foreground">
+                  {(concurrencySettings[id] ?? 1) === 1 ? "serial (mutex)" : `up to ${concurrencySettings[id]} in parallel`}
+                </span>
+              </div>
+            ))}
+            <div className="pt-2">
+              <Button
+                onClick={() => saveConcurrencyMutation.mutate(concurrencySettings)}
+                disabled={saveConcurrencyMutation.isPending}
+                data-testid="button-save-concurrency"
+              >
+                <Save className="h-4 w-4 mr-1" />
+                {saveConcurrencyMutation.isPending ? "Saving..." : "Save Concurrency Settings"}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <CustomVoicesCard />
 
