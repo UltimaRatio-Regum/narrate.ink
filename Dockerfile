@@ -27,11 +27,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml ./
+COPY backend/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir \
-    aiohttp bcrypt beautifulsoup4 ebooklib edge-tts fastapi gradio-client \
-    httpx lxml mutagen numpy psycopg2-binary pydantic pydub pyrubberband \
-    python-multipart scipy soprano-tts soundfile sqlalchemy textblob \
-    torch torchaudio uvicorn \
+    -r requirements.txt \
     --extra-index-url https://download.pytorch.org/whl/cpu
 
 
