@@ -278,7 +278,14 @@ def delete_job(job_id: str) -> bool:
 
         if export_audio_id:
             from database import ProjectAudioFile
-            db.query(ProjectAudioFile).filter(ProjectAudioFile.id == export_audio_id).delete(synchronize_session=False)
+            af = db.query(ProjectAudioFile).filter(ProjectAudioFile.id == export_audio_id).first()
+            if af:
+                if af.file_path:
+                    try:
+                        os.unlink(af.file_path)
+                    except OSError:
+                        pass
+                db.delete(af)
 
         db.commit()
 
@@ -312,7 +319,14 @@ async def cleanup_old_jobs(max_age_hours: int = 24):
 
         if export_audio_ids:
             from database import ProjectAudioFile
-            db.query(ProjectAudioFile).filter(ProjectAudioFile.id.in_(export_audio_ids)).delete(synchronize_session=False)
+            export_afs = db.query(ProjectAudioFile).filter(ProjectAudioFile.id.in_(export_audio_ids)).all()
+            for af in export_afs:
+                if af.file_path:
+                    try:
+                        os.unlink(af.file_path)
+                    except OSError:
+                        pass
+                db.delete(af)
 
         db.commit()
 

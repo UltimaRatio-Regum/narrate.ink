@@ -195,7 +195,27 @@ export function JobsPanel({ onPlayAudio }: JobsPanelProps) {
       a.href = blobUrl;
       const disposition = response.headers.get("content-disposition");
       const match = disposition?.match(/filename="?(.+?)"?$/);
-      a.download = match?.[1] || (job.jobType === "export" ? `export-${job.id}` : `job-${job.id}.wav`);
+      if (match?.[1]) {
+        // Force the correct extension from the server label — browsers/macOS may
+        // reclassify m4b as mp4 based on container sniffing, so strip any
+        // browser-appended extension and re-apply the one the server intended.
+        const serverName = match[1];
+        const exportExt = job.exportFormat === "m4b" ? "m4b"
+          : job.exportFormat === "mp3-chapters" ? "zip"
+          : job.exportFormat === "mp3" ? "mp3"
+          : null;
+        if (exportExt) {
+          a.download = serverName.replace(/\.[^.]+$/, "") + "." + exportExt;
+        } else {
+          a.download = serverName;
+        }
+      } else {
+        const ext = job.exportFormat === "m4b" ? "m4b"
+          : job.exportFormat === "mp3-chapters" ? "zip"
+          : job.exportFormat === "mp3" ? "mp3"
+          : "wav";
+        a.download = job.jobType === "export" ? `export-${job.id}.${ext}` : `job-${job.id}.wav`;
+      }
       a.click();
       URL.revokeObjectURL(blobUrl);
       toast({ title: "Download complete" });

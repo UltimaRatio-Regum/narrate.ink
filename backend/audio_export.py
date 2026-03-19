@@ -185,7 +185,8 @@ def export_single_mp3(
     description: Optional[str] = None,
     cover_image: Optional[bytes] = None,
     progress_callback: Optional[ProgressCallback] = None,
-) -> bytes:
+    output_path: Optional[str] = None,
+) -> Optional[bytes]:
     all_blobs = []
     for _ch_title, blobs in chapter_audio:
         all_blobs.extend(blobs)
@@ -213,6 +214,10 @@ def export_single_mp3(
         genre=genre, year=year, description=description,
         cover_image=cover_image, album=title,
     )
+    if output_path is not None:
+        with open(output_path, "wb") as f:
+            f.write(result)
+        return None
     return result
 
 
@@ -227,7 +232,8 @@ def export_mp3_per_chapter(
     description: Optional[str] = None,
     cover_image: Optional[bytes] = None,
     progress_callback: Optional[ProgressCallback] = None,
-) -> bytes:
+    output_path: Optional[str] = None,
+) -> Optional[bytes]:
     valid_chapters = [(ch_title, blobs) for ch_title, blobs in chapter_audio if blobs]
     total_chapters = max(1, len(valid_chapters))
     total_blobs = sum(len(blobs) for _, blobs in valid_chapters)
@@ -273,7 +279,12 @@ def export_mp3_per_chapter(
         if progress_callback:
             progress_callback("encode", total_chapters, total_chapters, "Finalizing ZIP...")
 
-    return zip_buf.getvalue()
+    zip_bytes = zip_buf.getvalue()
+    if output_path is not None:
+        with open(output_path, "wb") as f:
+            f.write(zip_bytes)
+        return None
+    return zip_bytes
 
 
 def _parse_ffmpeg_progress(line: str) -> Optional[float]:
@@ -334,7 +345,8 @@ def export_m4b(
     description: Optional[str] = None,
     cover_image: Optional[bytes] = None,
     progress_callback: Optional[ProgressCallback] = None,
-) -> bytes:
+    output_path: Optional[str] = None,
+) -> Optional[bytes]:
     tmp_dir = tempfile.mkdtemp(prefix="m4b_export_")
     try:
         valid_chapters = [(t, b) for t, b in chapter_audio if b]
@@ -342,6 +354,10 @@ def export_m4b(
             raise ValueError("No audio data to export")
 
         total_blobs = sum(len(blobs) for _, blobs in valid_chapters)
+        print(
+            f"[export_m4b] pause_ms={pause_ms} chapters={len(valid_chapters)} total_blobs={total_blobs}",
+            flush=True,
+        )
 
         # ------------------------------------------------------------------ #
         # Pass 1 – cheap duration scan (mutagen header reads, no full decode) #
@@ -411,7 +427,7 @@ def export_m4b(
             "-c:a", "aac",
             "-b:a", "128k",
             "-progress", "pipe:2",
-            "-f", "mp4",
+            "-f", "ipod",
             m4b_path,
         ]
         proc = subprocess.Popen(
@@ -490,27 +506,31 @@ def export_m4b(
         # ------------------------------------------------------------------ #
         # Embed cover art and extra tags via mutagen (post-encode)             #
         # ------------------------------------------------------------------ #
-        if cover_image:
-            try:
-                audio = MP4(m4b_path)
+        try:
+            audio = MP4(m4b_path)
+            audio["stik"] = [2]  # iTunes media kind: 2 = Audiobook
+            if cover_image:
                 img_format = MP4Cover.FORMAT_PNG if cover_image[:4] == b'\x89PNG' else MP4Cover.FORMAT_JPEG
                 audio["covr"] = [MP4Cover(cover_image, imageformat=img_format)]
-                if title:
-                    audio["\xa9nam"] = [_safe_str(title)]
-                if author:
-                    audio["\xa9ART"] = [_safe_str(author)]
-                if narrator:
-                    audio["aART"] = [_safe_str(narrator)]
-                if genre:
-                    audio["\xa9gen"] = [_safe_str(genre)]
-                if year:
-                    audio["\xa9day"] = [_safe_str(year)]
-                if description:
-                    audio["\xa9cmt"] = [_safe_str(description)]
-                audio.save()
-            except Exception as e:
-                logger.warning(f"Failed to embed cover art in M4B: {e}")
+            if title:
+                audio["\xa9nam"] = [_safe_str(title)]
+            if author:
+                audio["\xa9ART"] = [_safe_str(author)]
+            if narrator:
+                audio["aART"] = [_safe_str(narrator)]
+            if genre:
+                audio["\xa9gen"] = [_safe_str(genre)]
+            if year:
+                audio["\xa9day"] = [_safe_str(year)]
+            if description:
+                audio["\xa9cmt"] = [_safe_str(description)]
+            audio.save()
+        except Exception as e:
+            logger.warning(f"Failed to embed tags in M4B: {e}")
 
+        if output_path is not None:
+            shutil.move(m4b_path, output_path)
+            return None
         with open(m4b_path, "rb") as f:
             return f.read()
 

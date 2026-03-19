@@ -143,7 +143,7 @@ export const projectConfigSchema = z.object({
   narratorVoiceId: z.string().nullable(),
   baseVoiceId: z.string().nullable().optional(),
   defaultExaggeration: z.number().min(0).max(1).default(0.5),
-  pauseBetweenSegments: z.number().min(0).max(3000).default(500),
+  pauseBetweenSegments: z.number().min(0).max(3000).default(150),
   speakers: z.record(z.string(), speakerConfigSchema),
   ttsEngine: ttsEngineSchema.default("edge-tts"),
   narratorEmotion: narratorEmotionSchema.default("auto"),

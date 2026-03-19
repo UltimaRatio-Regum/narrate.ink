@@ -1,13 +1,20 @@
 import io
 import logging
+import os
+import pathlib
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
+EXPORTS_DIR = pathlib.Path(
+    os.environ.get("EXPORT_DIR", os.path.join(os.path.dirname(__file__), "..", "exports"))
+).resolve()
+EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
+
 from database import (
     JobStatus, get_db_session, TTSJob, ProjectAudioFile,
-    ProjectChapter, ProjectSection, ProjectChunk, Project
+    ProjectChapter, ProjectSection, ProjectChunk, Project, AppSetting
 )
 from audio_export import export_single_mp3, export_mp3_per_chapter, export_m4b
 
@@ -133,7 +140,24 @@ def _run_export(job_id: str):
             _set_progress(job, db, total_chunk_count, min(pct, 1.0), message)
 
         cover = project.meta_cover_image if project.meta_cover_image else None
-        pause_ms = int(project.pause_duration) if project.pause_duration else 500
+        if project.pause_duration:
+            pause_ms = int(project.pause_duration)
+        else:
+            pause_setting = db.query(AppSetting).filter(AppSetting.key == "default_pause_duration").first()
+            pause_ms = int(pause_setting.value) if pause_setting else 150
+
+        export_format = job.export_format or "mp3"
+
+        total_blobs = sum(len(blobs) for _, blobs in chapter_audio)
+        logger.info(
+            f"[export] project={project.title!r} format={export_format} "
+            f"pause_ms={pause_ms} chapters={len(chapter_audio)} total_blobs={total_blobs}"
+        )
+        print(
+            f"[export] project={project.title!r} format={export_format} "
+            f"pause_ms={pause_ms} chapters={len(chapter_audio)} total_blobs={total_blobs}",
+            flush=True,
+        )
 
         kwargs = dict(
             chapter_audio=chapter_audio,
@@ -148,18 +172,18 @@ def _run_export(job_id: str):
             progress_callback=_export_progress,
         )
 
-        export_format = job.export_format or "mp3"
+        audio_file_id = str(uuid.uuid4())
 
         if export_format == "mp3":
-            data = export_single_mp3(**kwargs)
+            ext = "mp3"
             scope_format = "mp3"
             label = f"{project.title}.mp3"
         elif export_format == "mp3-chapters":
-            data = export_mp3_per_chapter(**kwargs)
+            ext = "zip"
             scope_format = "zip"
             label = f"{project.title} - Chapters.zip"
         elif export_format == "m4b":
-            data = export_m4b(**kwargs)
+            ext = "m4b"
             scope_format = "m4b"
             label = f"{project.title}.m4b"
         else:
@@ -169,13 +193,24 @@ def _run_export(job_id: str):
             db.commit()
             return
 
+        output_path = EXPORTS_DIR / f"{audio_file_id}.{ext}"
+        kwargs["output_path"] = str(output_path)
+
+        if export_format == "mp3":
+            export_single_mp3(**kwargs)
+        elif export_format == "mp3-chapters":
+            export_mp3_per_chapter(**kwargs)
+        elif export_format == "m4b":
+            export_m4b(**kwargs)
+
         audio_file = ProjectAudioFile(
-            id=str(uuid.uuid4()),
+            id=audio_file_id,
             project_id=project.id,
             scope_type="export",
             scope_id=project.id,
             format=scope_format,
-            audio_data=data,
+            audio_data=None,
+            file_path=str(output_path),
             label=label,
             tts_engine="export",
             created_at=datetime.utcnow(),
@@ -190,7 +225,8 @@ def _run_export(job_id: str):
         job.updated_at = datetime.utcnow()
         db.commit()
 
-        logger.info(f"Export job {job_id} completed: {label} ({len(data)} bytes)")
+        file_size = output_path.stat().st_size if output_path.exists() else 0
+        logger.info(f"Export job {job_id} completed: {label} ({file_size} bytes) at {output_path}")
 
     except Exception as e:
         logger.exception(f"Export job {job_id} failed: {e}")

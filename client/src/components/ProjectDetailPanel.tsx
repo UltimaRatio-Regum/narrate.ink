@@ -315,7 +315,7 @@ function ProjectSettingsPanel({
   const [narratorSpeed, setNarratorSpeed] = useState(project.narratorSpeed ?? 1.0);
   const [baseVoiceId, setBaseVoiceId] = useState(project.baseVoiceId || "");
   const [exaggeration, setExaggeration] = useState(project.exaggeration ?? 0.5);
-  const [pauseDuration, setPauseDuration] = useState(project.pauseDuration ?? 500);
+  const [pauseDuration, setPauseDuration] = useState(project.pauseDuration ?? 150);
   const [narratorEmotion, setNarratorEmotion] = useState<NarratorEmotion>(project.narratorEmotion || "auto");
   const [dialogueEmotionMode, setDialogueEmotionMode] = useState<DialogueEmotionMode>(project.dialogueEmotionMode || "per-chunk");
   const [outputFormat, setOutputFormat] = useState<OutputFormat>(project.outputFormat || "mp3");
@@ -384,7 +384,7 @@ function ProjectSettingsPanel({
     setNarratorSpeed(project.narratorSpeed ?? 1.0);
     setBaseVoiceId(project.baseVoiceId || "");
     setExaggeration(project.exaggeration ?? 0.5);
-    setPauseDuration(project.pauseDuration ?? 500);
+    setPauseDuration(project.pauseDuration ?? 150);
     setNarratorEmotion(project.narratorEmotion || "auto");
     setDialogueEmotionMode(project.dialogueEmotionMode || "per-chunk");
     setOutputFormat(project.outputFormat || "mp3");

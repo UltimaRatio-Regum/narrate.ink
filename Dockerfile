@@ -63,7 +63,7 @@ COPY voice_samples/ voice_samples/
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 RUN chmod +x /app/docker-entrypoint.sh
 
-RUN mkdir -p /app/uploads /app/backend/uploads
+RUN mkdir -p /app/uploads /app/backend/uploads /app/exports
 
 ENV NODE_ENV=production
 ENV PORT=5000

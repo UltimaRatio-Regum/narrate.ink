@@ -405,7 +405,7 @@ export function SettingsTab() {
     localStorage.getItem("voxlibris-default-voice") || ""
   );
   const [pauseBetweenSegments, setPauseBetweenSegments] = useState(() =>
-    parseInt(localStorage.getItem("voxlibris-pause-between-segments") || "500", 10)
+    parseInt(localStorage.getItem("voxlibris-pause-between-segments") || "150", 10)
   );
   const [maxSilenceMs, setMaxSilenceMs] = useState(() =>
     parseInt(localStorage.getItem("voxlibris-max-silence-ms") || "300", 10)

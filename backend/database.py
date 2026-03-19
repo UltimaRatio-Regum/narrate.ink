@@ -245,7 +245,7 @@ class Project(Base):
     narrator_speed = Column(Float, nullable=False, default=1.0)
     base_voice_id = Column(String, nullable=True)
     exaggeration = Column(Float, nullable=False, default=0.5)
-    pause_duration = Column(Float, nullable=False, default=500.0)
+    pause_duration = Column(Float, nullable=False, default=150.0)
     speakers_json = Column(Text, nullable=True)
     narrator_emotion = Column(String, nullable=False, default="auto")
     dialogue_emotion_mode = Column(String, nullable=False, default="per-chunk")
@@ -337,7 +337,8 @@ class ProjectAudioFile(Base):
     project_id = Column(String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
     scope_type = Column(String, nullable=False)
     scope_id = Column(String, nullable=False)
-    audio_data = Column(LargeBinary, nullable=False)
+    audio_data = Column(LargeBinary, nullable=True)
+    file_path = Column(String, nullable=True)
     format = Column(String, nullable=False, default="mp3")
     duration_seconds = Column(Float, nullable=True)
     tts_engine = Column(String, nullable=True)
@@ -384,6 +385,8 @@ def _migrate_columns(db_engine):
         ("projects", "source_file_ext", "ALTER TABLE projects ADD COLUMN source_file_ext VARCHAR"),
         ("projects", "segmentation_started_at", "ALTER TABLE projects ADD COLUMN segmentation_started_at TIMESTAMP"),
         ("projects", "total_text_length", "ALTER TABLE projects ADD COLUMN total_text_length INTEGER"),
+        ("project_audio_files", "audio_data_nullable", "ALTER TABLE project_audio_files ALTER COLUMN audio_data DROP NOT NULL"),
+        ("project_audio_files", "file_path", "ALTER TABLE project_audio_files ADD COLUMN file_path VARCHAR"),
     ]
     
     with db_engine.connect() as conn:

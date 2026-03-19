@@ -1246,6 +1246,7 @@ async def startup_event():
     import asyncio
     _load_custom_voices_from_db()
     _seed_parsing_prompt()
+    _seed_default_pause_duration()
     _reset_orphaned_waiting_jobs()
     asyncio.create_task(run_cleanup_loop())
 
@@ -1411,7 +1412,10 @@ async def clear_completed_jobs(request: FastAPIRequest):
             db.delete(job)
 
         if export_audio_ids:
-            db.query(ProjectAudioFile).filter(ProjectAudioFile.id.in_(export_audio_ids)).delete(synchronize_session=False)
+            export_afs = db.query(ProjectAudioFile).filter(ProjectAudioFile.id.in_(export_audio_ids)).all()
+            for af in export_afs:
+                _delete_export_file(af)
+                db.delete(af)
 
         db.commit()
 
@@ -1871,6 +1875,8 @@ async def update_prosody_settings(request: ProsodySettingsRequest, req: FastAPIR
 
 
 PARSING_PROMPT_SETTING_KEY = "parsing_prompt"
+DEFAULT_PAUSE_DURATION_SETTING_KEY = "default_pause_duration"
+DEFAULT_PAUSE_DURATION_MS = 150
 
 INITIAL_PARSING_PROMPT = """You are splitting text into individual sentences for a text-to-speech audiobook engine. Your ONLY job is to split at sentence boundaries and quote boundaries, and assign speaker/emotion metadata. Do NOT consider chunk length or word count at all.
 
@@ -1968,6 +1974,22 @@ def _seed_parsing_prompt():
     except Exception as e:
         db.rollback()
         logger.warning(f"Failed to seed parsing prompt: {e}")
+    finally:
+        db.close()
+
+
+def _seed_default_pause_duration():
+    db = get_db_session()
+    try:
+        existing = db.query(AppSetting).filter(AppSetting.key == DEFAULT_PAUSE_DURATION_SETTING_KEY).first()
+        if not existing:
+            setting = AppSetting(key=DEFAULT_PAUSE_DURATION_SETTING_KEY, value=str(DEFAULT_PAUSE_DURATION_MS))
+            db.add(setting)
+            db.commit()
+            logger.info(f"Seeded default pause duration ({DEFAULT_PAUSE_DURATION_MS}ms) into database")
+    except Exception as e:
+        db.rollback()
+        logger.warning(f"Failed to seed default pause duration: {e}")
     finally:
         db.close()
 
@@ -2629,11 +2651,15 @@ async def create_project(
         else:
             final_title = _generate_untitled_name(db, user_id)
 
+        pause_setting = db.query(AppSetting).filter(AppSetting.key == DEFAULT_PAUSE_DURATION_SETTING_KEY).first()
+        default_pause = float(pause_setting.value) if pause_setting else DEFAULT_PAUSE_DURATION_MS
+
         project = Project(
             id=str(uuid.uuid4()),
             title=final_title,
             status="draft",
             user_id=user_id,
+            pause_duration=default_pause,
             source_type=source_type,
             source_filename=source_filename,
             source_file_data=file_content if file and file.filename else None,
@@ -2761,6 +2787,13 @@ async def delete_project(project_id: str, request: FastAPIRequest):
     db = get_db_session()
     try:
         project = _require_project_access(db, user_id, user_role, project_id)
+
+        export_files = db.query(ProjectAudioFile).filter(
+            ProjectAudioFile.project_id == project_id,
+            ProjectAudioFile.file_path != None,
+        ).all()
+        for af in export_files:
+            _delete_export_file(af)
 
         db.delete(project)
         db.commit()
@@ -3348,6 +3381,14 @@ async def list_project_audio(project_id: str, request: FastAPIRequest):
         db.close()
 
 
+def _delete_export_file(af: ProjectAudioFile):
+    if af.file_path:
+        try:
+            os.unlink(af.file_path)
+        except OSError:
+            pass
+
+
 @app.get("/projects/{project_id}/audio/{audio_file_id}")
 async def get_project_audio(project_id: str, audio_file_id: str, request: FastAPIRequest):
     user_id, user_role = _get_user_info(request)
@@ -3368,6 +3409,11 @@ async def get_project_audio(project_id: str, audio_file_id: str, request: FastAP
             "zip": "application/zip",
         }
         media_type = format_map.get(af.format, "application/octet-stream")
+
+        if af.file_path and os.path.exists(af.file_path):
+            filename = af.label or os.path.basename(af.file_path)
+            return FileResponse(af.file_path, media_type=media_type, filename=filename)
+
         headers = {}
         if af.label:
             safe_label = af.label.replace('"', '\\"')
@@ -3485,7 +3531,7 @@ async def download_project_audio(project_id: str, scope: str = "project", scopeI
         if not project:
             raise HTTPException(status_code=404, detail="Project not found")
 
-        pause_ms = int(project.pause_duration) if project.pause_duration else 500
+        pause_ms = int(project.pause_duration) if project.pause_duration else DEFAULT_PAUSE_DURATION_MS
         chunk_ids = []
         filename_label = project.title
 
@@ -3650,6 +3696,7 @@ async def delete_project_audio(project_id: str, audio_file_id: str, request: Fas
         ).first()
         if not af:
             raise HTTPException(status_code=404, detail="Audio file not found")
+        _delete_export_file(af)
         db.delete(af)
         db.commit()
         return {"status": "deleted"}

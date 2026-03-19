@@ -34,8 +34,10 @@ services:
     volumes:
       - uploads:/app/uploads
       - backend-uploads:/app/backend/uploads
+      - exports:/app/exports
 
 volumes:
   pgdata:
   uploads:
   backend-uploads:
+  exports:
