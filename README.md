@@ -84,29 +84,50 @@ Upload an ebook, and VoxLibris will:
 ### Docker Compose (Recommended)
 
 ```yaml
-version: "3.8"
 services:
-  voxlibris:
-    image: ghcr.io/yourusername/voxlibris:latest
-    ports:
-      - "8080:8080"
-    environment:
-      - DATABASE_URL=postgresql://voxlibris:secret@db:5432/voxlibris
-      - OPENROUTER_API_KEY=your-key-here
-    depends_on:
-      - db
+   db:
+      image: postgres:16-alpine
+      restart: unless-stopped
+      environment:
+         POSTGRES_USER: ${POSTGRES_USER:-voxlibris}
+         POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-voxlibris}
+         POSTGRES_DB: ${POSTGRES_DB:-voxlibris}
+      volumes:
+         - pgdata:/var/lib/postgresql/data
+      ports:
+         - "${DB_PORT:-5432}:5432"
+      healthcheck:
+         test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-voxlibris}"]
+         interval: 5s
+         timeout: 5s
+         retries: 5
 
-  db:
-    image: postgres:16
-    environment:
-      - POSTGRES_USER=voxlibris
-      - POSTGRES_PASSWORD=secret
-      - POSTGRES_DB=voxlibris
-    volumes:
-      - pgdata:/var/lib/postgresql/data
+   app:
+      build: .  
+      # Optionally, use the docker-build.sh script and do
+      #image: voxlibris:latest
+      restart: unless-stopped
+      depends_on:
+         db:
+            condition: service_healthy
+      ports:
+         - "${APP_PORT:-5000}:5000"
+      environment:
+         DATABASE_URL: postgresql://${POSTGRES_USER:-voxlibris}:${POSTGRES_PASSWORD:-voxlibris}@db:5432/${POSTGRES_DB:-voxlibris}
+         SESSION_SECRET: ${SESSION_SECRET:-change-me-in-production}
+         AI_INTEGRATIONS_OPENROUTER_BASE_URL: ${AI_INTEGRATIONS_OPENROUTER_BASE_URL:-}
+         AI_INTEGRATIONS_OPENROUTER_API_KEY: ${AI_INTEGRATIONS_OPENROUTER_API_KEY:-}
+         PORT: "5000"
+         NODE_ENV: production
+      volumes:
+         - uploads:/app/uploads
+         - backend-uploads:/app/backend/uploads
 
 volumes:
-  pgdata:
+   pgdata:
+   uploads:
+   backend-uploads:
+  
 ```
 
 ```bash
