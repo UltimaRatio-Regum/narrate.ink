@@ -138,6 +138,20 @@ Then open `http://localhost:8080` and log in with the default credentials (`Admi
 
 > **⚠️ Change the default password immediately** via the user menu in the top-right corner.
 
+### Local Development (JetBrains IDEs)
+
+If you are using PyCharm, IntelliJ IDEA, or another JetBrains IDE, the repository includes pre-configured run configurations and project settings in the `.idea.example/` folder. Copy the contents of that folder into the `.idea/` directory that your IDE creates when you first open the project:
+
+```bash
+cp -r .idea.example/. .idea/
+```
+
+This gives you ready-to-use run configurations for:
+- **npm dev** — starts the Node.js/Vite frontend and Express server in development mode
+- **FastAPI Backend** — starts the Python backend via uvicorn with hot-reload, using the `.venv` virtual environment
+
+After copying, reload the project in your IDE and the configurations will appear in the run dropdown.
+
 ### Connecting a TTS Engine
 
 1. Go to **Settings** → **TTS Engine Management**

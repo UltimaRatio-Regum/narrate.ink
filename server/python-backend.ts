@@ -7,10 +7,12 @@ let pythonProcess: ChildProcess | null = null;
 export async function startPythonBackend(): Promise<void> {
   return new Promise((resolve, reject) => {
     const backendDir = path.join(process.cwd(), "backend");
-    
+    const venvPython = path.join(process.cwd(), ".venv", "bin", "python");
+    const pythonBin = require("fs").existsSync(venvPython) ? venvPython : "python";
+
     log("Starting Python FastAPI backend...", "python");
-    
-    pythonProcess = spawn("python", ["main.py"], {
+
+    pythonProcess = spawn(pythonBin, ["-m", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", "8000"], {
       cwd: backendDir,
       stdio: ["ignore", "pipe", "pipe"],
       env: { ...process.env },
