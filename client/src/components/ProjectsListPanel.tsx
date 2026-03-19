@@ -25,11 +25,11 @@ interface ProjectsListPanelProps {
 }
 
 function formatSegEta(progress: SegmentationProgress): string | null {
-  const { processedBytes, totalBytes, startedAt } = progress;
+  const { processedBytes, totalBytes, firstChunkAt } = progress;
   const remaining = totalBytes - processedBytes;
-  if (remaining <= 0 || !startedAt || processedBytes === 0) return null;
+  if (remaining <= 0 || !firstChunkAt || processedBytes === 0) return null;
 
-  const elapsedMs = Date.now() - new Date(startedAt).getTime();
+  const elapsedMs = Date.now() - new Date(firstChunkAt).getTime();
   if (elapsedMs <= 0) return null;
 
   const ratePerMs = processedBytes / elapsedMs;

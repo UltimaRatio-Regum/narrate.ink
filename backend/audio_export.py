@@ -28,6 +28,22 @@ logger = logging.getLogger(__name__)
 ProgressCallback = Callable[[str, int, int, str], None]
 
 
+def _safe_str(value, fallback: str = "") -> str:
+    """Return a clean Unicode string, safely decoding bytes if necessary."""
+    if value is None:
+        return fallback
+    if isinstance(value, bytes):
+        for enc in ("utf-8", "utf-8-sig", "latin-1"):
+            try:
+                return value.decode(enc)
+            except UnicodeDecodeError:
+                continue
+        return value.decode("latin-1", errors="replace")
+    if isinstance(value, str):
+        return value
+    return str(value)
+
+
 def _pairwise_merge(segments: List[AudioSegment]) -> AudioSegment:
     if len(segments) == 0:
         return AudioSegment.empty()
@@ -72,21 +88,21 @@ def _apply_id3_tags(
         audio.add_tags()
 
     tags = audio.tags
-    tags.add(TIT2(encoding=3, text=title))
+    tags.add(TIT2(encoding=3, text=_safe_str(title)))
     if album:
-        tags.add(TALB(encoding=3, text=album))
+        tags.add(TALB(encoding=3, text=_safe_str(album)))
     if author:
-        tags.add(TPE1(encoding=3, text=author))
+        tags.add(TPE1(encoding=3, text=_safe_str(author)))
     if narrator:
-        tags.add(TPE2(encoding=3, text=narrator))
+        tags.add(TPE2(encoding=3, text=_safe_str(narrator)))
     if genre:
-        tags.add(TCON(encoding=3, text=genre))
+        tags.add(TCON(encoding=3, text=_safe_str(genre)))
     if year:
-        tags.add(TDRC(encoding=3, text=year))
+        tags.add(TDRC(encoding=3, text=_safe_str(year)))
     if description:
-        tags.add(COMM(encoding=3, lang="eng", desc="", text=description))
+        tags.add(COMM(encoding=3, lang="eng", desc="", text=_safe_str(description)))
     if track_number:
-        tags.add(TRCK(encoding=3, text=track_number))
+        tags.add(TRCK(encoding=3, text=_safe_str(track_number)))
     if cover_image:
         mime = "image/jpeg"
         if cover_image[:4] == b'\x89PNG':
@@ -344,20 +360,20 @@ def export_m4b(
             return val.replace("\\", "\\\\").replace("=", "\\=").replace(";", "\\;").replace("#", "\\#").replace("\n", "\\\n")
 
         ffmetadata_path = os.path.join(tmp_dir, "chapters.txt")
-        with open(ffmetadata_path, "w") as f:
+        with open(ffmetadata_path, "w", encoding="utf-8") as f:
             f.write(";FFMETADATA1\n")
             if title:
-                f.write(f"title={_esc_ffmeta(title)}\n")
+                f.write(f"title={_esc_ffmeta(_safe_str(title))}\n")
             if author:
-                f.write(f"artist={_esc_ffmeta(author)}\n")
+                f.write(f"artist={_esc_ffmeta(_safe_str(author))}\n")
             if narrator:
-                f.write(f"album_artist={_esc_ffmeta(narrator)}\n")
+                f.write(f"album_artist={_esc_ffmeta(_safe_str(narrator))}\n")
             if genre:
-                f.write(f"genre={_esc_ffmeta(genre)}\n")
+                f.write(f"genre={_esc_ffmeta(_safe_str(genre))}\n")
             if year:
-                f.write(f"date={_esc_ffmeta(year)}\n")
+                f.write(f"date={_esc_ffmeta(_safe_str(year))}\n")
             if description:
-                f.write(f"comment={_esc_ffmeta(description)}\n")
+                f.write(f"comment={_esc_ffmeta(_safe_str(description))}\n")
             f.write("\n")
 
             for ch in chapter_meta:
@@ -365,7 +381,7 @@ def export_m4b(
                 f.write("TIMEBASE=1/1000\n")
                 f.write(f"START={ch['start_ms']}\n")
                 f.write(f"END={ch['end_ms']}\n")
-                f.write(f"title={_esc_ffmeta(ch['title'])}\n")
+                f.write(f"title={_esc_ffmeta(_safe_str(ch['title']))}\n")
                 f.write("\n")
 
         total_duration_s = cumulative_ms / 1000.0
@@ -382,11 +398,12 @@ def export_m4b(
             "-f", "mp4",
             m4b_path,
         ]
-        proc = subprocess.Popen(cmd, stderr=subprocess.PIPE, stdout=subprocess.DEVNULL, text=True)
+        proc = subprocess.Popen(cmd, stderr=subprocess.PIPE, stdout=subprocess.DEVNULL)
         stderr_lines = []
         last_pct = 0
         try:
-            for line in proc.stderr:
+            for raw_line in proc.stderr:
+                line = raw_line.decode("utf-8", errors="replace")
                 stderr_lines.append(line)
                 if progress_callback and total_duration_s > 0:
                     t = _parse_ffmpeg_progress(line)
@@ -416,17 +433,17 @@ def export_m4b(
                     img_format = MP4Cover.FORMAT_PNG
                 audio["covr"] = [MP4Cover(cover_image, imageformat=img_format)]
                 if title:
-                    audio["\xa9nam"] = [title]
+                    audio["\xa9nam"] = [_safe_str(title)]
                 if author:
-                    audio["\xa9ART"] = [author]
+                    audio["\xa9ART"] = [_safe_str(author)]
                 if narrator:
-                    audio["aART"] = [narrator]
+                    audio["aART"] = [_safe_str(narrator)]
                 if genre:
-                    audio["\xa9gen"] = [genre]
+                    audio["\xa9gen"] = [_safe_str(genre)]
                 if year:
-                    audio["\xa9day"] = [year]
+                    audio["\xa9day"] = [_safe_str(year)]
                 if description:
-                    audio["\xa9cmt"] = [description]
+                    audio["\xa9cmt"] = [_safe_str(description)]
                 audio.save()
             except Exception as e:
                 logger.warning(f"Failed to embed cover art in M4B: {e}")

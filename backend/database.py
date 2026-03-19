@@ -262,6 +262,7 @@ class Project(Base):
     source_file_data = Column(LargeBinary, nullable=True)
     source_file_ext = Column(String, nullable=True)
     segmentation_started_at = Column(DateTime, nullable=True)
+    total_text_length = Column(Integer, nullable=True)
     user_id = Column(String, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -382,6 +383,7 @@ def _migrate_columns(db_engine):
         ("projects", "source_file_data", "ALTER TABLE projects ADD COLUMN source_file_data BYTEA"),
         ("projects", "source_file_ext", "ALTER TABLE projects ADD COLUMN source_file_ext VARCHAR"),
         ("projects", "segmentation_started_at", "ALTER TABLE projects ADD COLUMN segmentation_started_at TIMESTAMP"),
+        ("projects", "total_text_length", "ALTER TABLE projects ADD COLUMN total_text_length INTEGER"),
     ]
     
     with db_engine.connect() as conn:

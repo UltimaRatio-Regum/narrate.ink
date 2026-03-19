@@ -16,6 +16,16 @@ from database import (
 
 logger = logging.getLogger(__name__)
 
+# In-memory progress for the chapter currently being segmented.
+# Keyed by project_id.  Reset to 0 at the start of each chapter so completed
+# chapters (whose chunks are already in the DB) are not double-counted.
+_chapter_chars_in_progress: dict[str, int] = {}
+
+
+def get_chapter_chars_in_progress(project_id: str) -> int:
+    return _chapter_chars_in_progress.get(project_id, 0)
+
+
 SECTION_WORD_LIMIT = 300
 MAX_CHUNKS_PER_SECTION = 30
 WORDS_PER_SECOND = 2.5
@@ -668,6 +678,7 @@ async def _run_segmentation(project_id: str, model: str):
             for chapter in chapters:
                 try:
                     chapter.status = "segmenting"
+                    _chapter_chars_in_progress[project_id] = 0
                     db.commit()
 
                     section_texts = split_into_sections(chapter.raw_text)
@@ -726,6 +737,9 @@ async def _run_segmentation(project_id: str, model: str):
                                         )
                                         db.add(chunk)
                                         chunk_section_index += 1
+                                        _chapter_chars_in_progress[project_id] = (
+                                            _chapter_chars_in_progress.get(project_id, 0) + len(st)
+                                        )
 
                                 context = section_text[-500:] if len(section_text) > 500 else section_text
 
@@ -797,6 +811,7 @@ async def _run_segmentation(project_id: str, model: str):
             )
 
         db.commit()
+        _chapter_chars_in_progress.pop(project_id, None)
         logger.info(f"Project {project_id} segmentation complete: {project.status}")
 
     except Exception as e:

@@ -40,7 +40,7 @@ from database import (
     AppSetting, TTSJob, TTSSegment, JobStatus,
 )
 from remote_tts_client import RemoteTTSClient
-from project_segmenter import segment_project_background, split_into_sections, _call_llm_for_section, rechunk_section
+from project_segmenter import segment_project_background, split_into_sections, _call_llm_for_section, rechunk_section, get_chapter_chars_in_progress
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -2269,55 +2269,36 @@ async def list_projects(request: FastAPIRequest):
         project_ids = [p.id for p in projects]
 
         # ── Batch: segmentation progress (projects currently segmenting) ────────
-        # Total   = sum of chapter raw_text lengths (fixed from the start)
-        # Processed = bytes from fully-done chapters + bytes from completed
-        #             sections inside the chapter that is currently segmenting.
-        # This gives per-section granularity rather than per-chapter jumps.
+        # Total     = stored at project creation (total_text_length)
+        # Processed = DB sum of chunk text for *completed* chapters
+        #           + in-memory counter for the chapter currently being segmented
         segmenting_ids = [p.id for p in projects if p.status == "segmenting"]
         seg_progress_map: dict = {}
         if segmenting_ids:
-            # Total bytes: all chapters (status-independent)
-            chapter_byte_rows = db.query(
+            for p in projects:
+                if p.status == "segmenting":
+                    seg_progress_map[p.id] = {
+                        "total": int(p.total_text_length or 0),
+                        "processed": get_chapter_chars_in_progress(p.id),
+                        "first_chunk_at": None,
+                    }
+
+            # Add chars from chapters already fully segmented (in DB)
+            completed_rows = db.query(
                 ProjectChapter.project_id,
-                ProjectChapter.id.label("chapter_id"),
-                ProjectChapter.status.label("chapter_status"),
-                _sqla_func.length(ProjectChapter.raw_text).label("bytes"),
+                _sqla_func.sum(_sqla_func.coalesce(_sqla_func.char_length(ProjectChunk.text), 0)).label("processed"),
+                _sqla_func.min(ProjectChunk.created_at).label("first_chunk_at"),
+            ).join(ProjectSection, ProjectSection.chapter_id == ProjectChapter.id
+            ).join(ProjectChunk, ProjectChunk.section_id == ProjectSection.id
             ).filter(
-                ProjectChapter.project_id.in_(segmenting_ids)
-            ).all()
+                ProjectChapter.project_id.in_(segmenting_ids),
+                ProjectChapter.status.in_(["segmented", "failed"]),
+            ).group_by(ProjectChapter.project_id).all()
 
-            for row in chapter_byte_rows:
-                pid = row.project_id
-                if pid not in seg_progress_map:
-                    seg_progress_map[pid] = {"total": 0, "processed": 0}
-                seg_progress_map[pid]["total"] += row.bytes or 0
-                if row.chapter_status in ("segmented", "failed"):
-                    seg_progress_map[pid]["processed"] += row.bytes or 0
-
-            # For the chapter(s) currently being segmented, add bytes from
-            # sections that have already finished within that chapter.
-            segmenting_chapter_ids = [
-                row.chapter_id for row in chapter_byte_rows
-                if row.chapter_status == "segmenting"
-            ]
-            if segmenting_chapter_ids:
-                section_byte_rows = db.query(
-                    ProjectSection.chapter_id,
-                    _sqla_func.sum(_sqla_func.length(ProjectSection.raw_text)).label("bytes"),
-                ).filter(
-                    ProjectSection.chapter_id.in_(segmenting_chapter_ids),
-                    ProjectSection.status.in_(["segmented", "failed"]),
-                ).group_by(ProjectSection.chapter_id).all()
-
-                # Map chapter_id → project_id for the lookup
-                chap_to_proj = {
-                    row.chapter_id: row.project_id for row in chapter_byte_rows
-                    if row.chapter_status == "segmenting"
-                }
-                for row in section_byte_rows:
-                    pid = chap_to_proj.get(row.chapter_id)
-                    if pid and pid in seg_progress_map:
-                        seg_progress_map[pid]["processed"] += row.bytes or 0
+            for row in completed_rows:
+                if row.project_id in seg_progress_map:
+                    seg_progress_map[row.project_id]["processed"] += int(row.processed or 0)
+                    seg_progress_map[row.project_id]["first_chunk_at"] = row.first_chunk_at
 
         # ── Batch: chapter counts ──────────────────────────────────────────────
         chapter_rows = db.query(
@@ -2360,11 +2341,11 @@ async def list_projects(request: FastAPIRequest):
                 seg_progress = None
                 if p.id in seg_progress_map:
                     sp = seg_progress_map[p.id]
-                    started_at = getattr(p, "segmentation_started_at", None)
+                    first_chunk_at = sp.get("first_chunk_at")
                     seg_progress = {
                         "totalBytes": sp["total"],
                         "processedBytes": sp["processed"],
-                        "startedAt": started_at.isoformat() + "Z" if started_at else None,
+                        "firstChunkAt": first_chunk_at.isoformat() + "Z" if first_chunk_at else None,
                     }
                 result.append(_serialize_project_list(
                     p,
@@ -2619,6 +2600,7 @@ async def create_project(
                 project.meta_cover_image = epub_metadata["cover_image"]
 
         if chapters_data is not None:
+            project.total_text_length = sum(len(ch_text) for _, ch_text in chapters_data)
             db.add(project)
             db.flush()
 
@@ -2633,6 +2615,7 @@ async def create_project(
                 )
                 db.add(chapter)
         elif text:
+            project.total_text_length = len(text)
             db.add(project)
             db.flush()
 

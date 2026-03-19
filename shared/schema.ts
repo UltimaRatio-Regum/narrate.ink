@@ -348,7 +348,7 @@ export type ProjectData = z.infer<typeof projectSchema>;
 export const segmentationProgressSchema = z.object({
   totalBytes: z.number(),
   processedBytes: z.number(),
-  startedAt: z.string().nullable(),
+  firstChunkAt: z.string().nullable(),
 });
 export type SegmentationProgress = z.infer<typeof segmentationProgressSchema>;
 

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Wand2, Save, Book, Layers, FileText, Type, Download, Upload, X, Image, Users, AlertTriangle, RefreshCw, Merge, CheckSquare, Loader2 } from "lucide-react";
+import { Wand2, Save, Book, Layers, FileText, Type, Download, Upload, X, Image, Users, AlertTriangle, RefreshCw, Merge, CheckSquare, Loader2, Clock } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,6 +16,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { ProjectAudioList } from "@/components/ProjectAudioList";
@@ -583,6 +584,33 @@ function ProjectSettingsPanel({
         <span>{totalChunks} chunks</span>
         <span>{project.sourceType}</span>
       </div>
+
+      {project.status === "segmenting" && (() => {
+        const total = chapters.length;
+        const completed = chapters.filter(c => c.status === "segmented" || c.status === "failed").length;
+        const segmentingChapter = chapters.find(c => c.status === "segmenting");
+        const totalSections = segmentingChapter?.sections?.length ?? 0;
+        const completedSections = segmentingChapter?.sections?.filter(
+          (s: any) => s.status === "segmented" || s.status === "failed"
+        ).length ?? 0;
+        const pct = total > 0
+          ? Math.round(((completed + (totalSections > 0 ? completedSections / totalSections : 0)) / total) * 100)
+          : 0;
+        return (
+          <div className="space-y-1">
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span className="flex items-center gap-1">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Segmenting… {completed}/{total} chapters ({pct}%)
+                {segmentingChapter && totalSections > 0 && (
+                  <span className="ml-1">— section {completedSections}/{totalSections} in current chapter</span>
+                )}
+              </span>
+            </div>
+            <Progress value={pct} className="h-1.5" />
+          </div>
+        );
+      })()}
 
       <Separator />
 
