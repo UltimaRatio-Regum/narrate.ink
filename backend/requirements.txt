@@ -27,8 +27,8 @@ nltk==3.9.2
 pydub==0.25.1
 soundfile==0.13.1
 mutagen==1.47.0
-scipy==1.17.0
-numpy==2.4.1
+scipy==1.13.1
+numpy==1.26.4
 sounddevice==0.5.5
 pyrubberband==0.4.0
 
