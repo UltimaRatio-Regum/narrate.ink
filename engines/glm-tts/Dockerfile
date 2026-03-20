@@ -25,7 +25,14 @@ RUN pip install --no-cache-dir \
     --index-url https://download.pytorch.org/whl/cpu
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+
+# openai-whisper uses a legacy setup.py that imports pkg_resources, which
+# newer setuptools no longer expose inside pip's isolated build environments.
+# Installing it with --no-build-isolation bypasses that isolation so it can
+# use the system setuptools where pkg_resources is available.
+RUN pip install --no-cache-dir setuptools && \
+    pip install --no-cache-dir --no-build-isolation openai-whisper==20231117 && \
+    pip install --no-cache-dir -r requirements.txt
 
 # Copy our VoxLibris engine files into the repo root, alongside
 # glmtts_inference.py so Python can import it without path manipulation.

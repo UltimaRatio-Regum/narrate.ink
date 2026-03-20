@@ -116,7 +116,7 @@ def load_model():
     os.chdir(GLMTTS_DIR)
 
     from glmtts_inference import load_models  # noqa: PLC0415
-a
+
     logger.info(f"Loading GLM-TTS model on {_device}…")
     _frontend, _text_frontend, _, _llm, _flow = load_models(
         use_phoneme=False, sample_rate=SAMPLE_RATE

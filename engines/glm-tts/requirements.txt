@@ -13,7 +13,6 @@ x_transformers==1.42.26
 zhconv==1.4.3
 zhon==2.1.1
 inflect==7.3.1
-openai-whisper==20231117
 contractions==0.1.73
 einops==0.8.1
 emoji==2.14.1
@@ -26,6 +25,7 @@ regex==2023.12.25
 tqdm==4.66.4
 HyperPyYAML==1.2.2
 pronouncing==0.2.0
+soxr
 onnxruntime
 huggingface_hub
 pyrubberband
