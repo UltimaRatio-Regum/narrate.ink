@@ -16,9 +16,10 @@ import type { ProjectData } from "@shared/schema";
 
 interface BackupProjectDialogProps {
   project: ProjectData;
+  iconOnly?: boolean;
 }
 
-export function BackupProjectDialog({ project }: BackupProjectDialogProps) {
+export function BackupProjectDialog({ project, iconOnly }: BackupProjectDialogProps) {
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [includeAudio, setIncludeAudio] = useState(false);
@@ -69,10 +70,16 @@ export function BackupProjectDialog({ project }: BackupProjectDialogProps) {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="w-full" data-testid="button-backup-project">
-          <Archive className="h-3.5 w-3.5 mr-2" />
-          Backup Project
-        </Button>
+        {iconOnly ? (
+          <Button variant="ghost" size="icon" data-testid="button-backup-project" title="Backup Project">
+            <Archive className="h-4 w-4" />
+          </Button>
+        ) : (
+          <Button variant="outline" size="sm" className="w-full" data-testid="button-backup-project">
+            <Archive className="h-3.5 w-3.5 mr-2" />
+            Backup Project
+          </Button>
+        )}
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
