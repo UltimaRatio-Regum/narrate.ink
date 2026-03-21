@@ -1008,6 +1008,7 @@ const ProjectSettingsPanel = forwardRef<
                       type="number"
                       min={p.min_value}
                       max={p.max_value}
+                      step={p.data_type === "float" ? 0.05 : 1}
                       value={engineOptions[p.short_name] ?? p.default_value}
                       onChange={(e) => setEngineOptions((prev) => ({ ...prev, [p.short_name]: Number(e.target.value) }))}
                     />

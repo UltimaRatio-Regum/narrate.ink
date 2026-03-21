@@ -17,7 +17,7 @@ from pathlib import Path
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import Response, JSONResponse, HTMLResponse
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, Dict, Any
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("chatterbox-engine")
@@ -300,6 +300,7 @@ class ConvertRequest(BaseModel):
     volume: int = Field(default=75, ge=1, le=100)
     speed_adjust: float = Field(default=0.0, ge=-5.0, le=5.0)
     pitch_adjust: float = Field(default=0.0, ge=-5.0, le=5.0)
+    engine_options: Optional[Dict[str, Any]] = None
 
 
 @app.post("/GetEngineDetails")
@@ -316,6 +317,32 @@ async def get_engine_details(request: Request):
         "supports_voice_cloning": True,
         "builtin_voices": [],
         "supported_emotions": CANONICAL_EMOTIONS,
+        "engine_params": [
+            {
+                "short_name": "exaggeration",
+                "friendly_name": "Exaggeration",
+                "data_type": "float",
+                "min_value": 0.25,
+                "max_value": 2.0,
+                "default_value": 0.5,
+            },
+            {
+                "short_name": "cfg_weight",
+                "friendly_name": "CFG Weight",
+                "data_type": "float",
+                "min_value": 0.0,
+                "max_value": 1.0,
+                "default_value": 0.5,
+            },
+            {
+                "short_name": "temperature",
+                "friendly_name": "Temperature",
+                "data_type": "float",
+                "min_value": 0.05,
+                "max_value": 5.0,
+                "default_value": 0.8,
+            },
+        ],
         "extra_properties": {
             "model": "ResembleAI/chatterbox",
             "max_characters": MAX_CHARS,
@@ -411,13 +438,25 @@ async def convert_text_to_speech(request: Request):
 
         dominant_emotion = req.emotion_set[0].lower(
         ) if req.emotion_set else "neutral"
-        base_exaggeration = EMOTION_EXAGGERATION_MAP.get(dominant_emotion, 0.5)
         intensity_factor = req.intensity / 50.0
-        exaggeration = min(1.0, max(0.0, base_exaggeration * intensity_factor))
 
-        cfg_weight = EMOTION_CFG_MAP.get(dominant_emotion, 0.5)
+        opts = req.engine_options or {}
 
-        temperature = EMOTION_TEMPERATURE_MAP.get(dominant_emotion, 0.8)
+        if "exaggeration" in opts:
+            exaggeration = float(max(0.25, min(2.0, opts["exaggeration"])))
+        else:
+            base_exaggeration = EMOTION_EXAGGERATION_MAP.get(dominant_emotion, 0.5)
+            exaggeration = min(1.0, max(0.0, base_exaggeration * intensity_factor))
+
+        if "cfg_weight" in opts:
+            cfg_weight = float(max(0.0, min(1.0, opts["cfg_weight"])))
+        else:
+            cfg_weight = EMOTION_CFG_MAP.get(dominant_emotion, 0.5)
+
+        if "temperature" in opts:
+            temperature = float(max(0.05, min(5.0, opts["temperature"])))
+        else:
+            temperature = EMOTION_TEMPERATURE_MAP.get(dominant_emotion, 0.8)
 
         emotion_speed = EMOTION_SPEED_MAP.get(dominant_emotion, 1.0)
         emotion_pitch = EMOTION_PITCH_MAP.get(dominant_emotion, 0.0)
@@ -425,11 +464,13 @@ async def convert_text_to_speech(request: Request):
         emotion_speed = 1.0 + (emotion_speed - 1.0) * intensity_factor
         emotion_pitch = emotion_pitch * intensity_factor
 
+        override_keys = [k for k in ("exaggeration", "cfg_weight", "temperature") if k in opts]
         logger.info(
             f"Generating with Chatterbox: emotion={dominant_emotion}, "
             f"exaggeration={exaggeration:.2f}, cfg={cfg_weight:.2f}, "
             f"temperature={temperature:.2f}, emotion_speed={emotion_speed:.3f}, "
-            f"emotion_pitch={emotion_pitch:.2f}, text_len={len(text)}")
+            f"emotion_pitch={emotion_pitch:.2f}, text_len={len(text)}"
+            + (f", overrides={override_keys}" if override_keys else ""))
 
         wav = tts_model.generate(
             text,
