@@ -33,7 +33,7 @@ import {
 } from "@/components/ui/dialog";
 import { apiRequest } from "@/lib/queryClient";
 import { TTS_ENGINES, isVoiceCloningEngine } from "@/lib/tts-engines";
-import type { TTSEngine, LibraryVoice, EdgeVoice } from "@shared/schema";
+import type { TTSEngine, EdgeVoice } from "@shared/schema";
 import { useAuth } from "@/lib/auth";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
@@ -433,11 +433,6 @@ export function SettingsTab() {
 
   const showVoiceCloningOptions = isVoiceCloningEngine(defaultEngine as TTSEngine);
   
-  const { data: libraryVoicesData } = useQuery<LibraryVoice[]>({
-    queryKey: ["/api/voice-library"],
-    enabled: showVoiceCloningOptions,
-  });
-
   const { data: registeredEngines, isLoading: enginesLoading } = useQuery<RegisteredEngine[]>({
     queryKey: ["/api/tts-engines"],
   });
@@ -701,8 +696,8 @@ export function SettingsTab() {
         label: `${v.name} (${v.gender})`,
       }));
     }
-    if (showVoiceCloningOptions && libraryVoicesData) {
-      return libraryVoicesData.map((v) => ({
+    if (showVoiceCloningOptions && voiceLibraryDb) {
+      return voiceLibraryDb.map((v) => ({
         value: `library:${v.id}`,
         label: v.name,
       }));

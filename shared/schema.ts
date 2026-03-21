@@ -52,16 +52,18 @@ export type InsertVoiceSample = z.infer<typeof insertVoiceSampleSchema>;
 
 // Voice library entry (pre-uploaded voice samples)
 export const libraryVoiceSchema = z.object({
-  id: z.string(),           // e.g., "p226"
-  name: z.string(),         // e.g., "Voice 226: M/22 Surrey, England"
-  gender: z.enum(["M", "F"]),
-  age: z.number(),
-  language: z.string(),     // e.g., "English", "Scottish"
-  location: z.string(),     // e.g., "Surrey", "Southern_England"
-  audioUrl: z.string(),     // URL to mic1 file
-  altAudioUrl: z.string().nullable(), // URL to mic2 file if available
-  transcript: z.string().nullable(),  // Text content of transcript
+  id: z.string(),
+  name: z.string(),
+  gender: z.string(),                          // "M", "F", or "U" (unknown)
+  age: z.number().nullable().optional(),
+  language: z.string().nullable().optional(),
+  location: z.string().nullable().optional(),
+  audioUrl: z.string(),
+  altAudioUrl: z.string().nullable().optional(),
+  transcript: z.string().nullable().optional(),
   duration: z.number(),
+  hasAudio: z.boolean().optional(),
+  hasAltAudio: z.boolean().optional(),
 });
 
 export type LibraryVoice = z.infer<typeof libraryVoiceSchema>;

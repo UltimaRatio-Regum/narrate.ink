@@ -58,7 +58,7 @@ export function ProjectWizardTab({ onProjectCreated }: ProjectWizardTabProps) {
   });
 
   const { data: libraryVoices = [] } = useQuery<LibraryVoice[]>({
-    queryKey: ["/api/voice-library"],
+    queryKey: ["/api/voice-library-db"],
     enabled: isVoiceCloningEngine(ttsEngine),
   });
 

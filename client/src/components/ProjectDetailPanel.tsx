@@ -63,7 +63,7 @@ export function ProjectDetailPanel({ selection, project, onRefresh, settingsPane
   });
 
   const { data: libraryVoices = [] } = useQuery<LibraryVoice[]>({
-    queryKey: ["/api/voice-library"],
+    queryKey: ["/api/voice-library-db"],
   });
 
   const { data: registeredEngines = [] } = useQuery<any[]>({
