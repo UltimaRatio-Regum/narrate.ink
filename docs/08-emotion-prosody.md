@@ -20,16 +20,16 @@ During text analysis, the system assigns one of 14 canonical emotions to each ch
 | Happy | Joyful moments, good news |
 | Sad | Loss, melancholy, disappointment |
 | Angry | Confrontation, frustration |
-| Fearful | Danger, anxiety, suspense |
-| Surprised | Unexpected events, revelations |
-| Disgusted | Revulsion, strong disapproval |
-| Contemptuous | Disdain, arrogance |
-| Tender | Affection, intimacy, gentleness |
+| Fear | Danger, dread, immediate threat |
+| Surprise | Unexpected events, revelations |
+| Disgust | Revulsion, strong disapproval |
 | Excited | High energy, enthusiasm |
-| Tense | Suspense, anticipation |
-| Amused | Humor, light-heartedness |
-| Bored | Monotony, disinterest |
 | Calm | Peaceful, meditative passages |
+| Confused | Uncertainty, disorientation |
+| Anxious | Worry, nervous anticipation, suspense |
+| Hopeful | Optimism, longing, anticipation of good |
+| Melancholy | Wistful sadness, nostalgia, quiet grief |
+| Fearful | Sustained dread, phobia, prolonged danger |
 
 ### Detection Methods
 - **Primary:** LLM-based analysis considers context, dialogue, and narrative cues
@@ -76,10 +76,12 @@ Uses the emotion from the chunk with the most words. Good for:
 Different TTS engines handle emotions differently:
 
 - **Edge TTS** — Uses SSML emotion tags where available; some voices support built-in styles
-- **Chatterbox** — Has an exaggeration parameter for emotion intensity
-- **Other engines** — May use emotion-specific prompting or prosody modification
+- **Chatterbox** — Maps emotions to `exaggeration`, `cfg_weight`, and `temperature` parameters; higher intensity scales the exaggeration factor
+- **Qwen2.5/3-TTS** — Embeds emotion as an instruct prompt (e.g., "Speak with an anxious, tense tone")
+- **XTTSv2 / OpenVoice V2** — Uses per-emotion speed multipliers and pitch semitone offsets (prosody emulation)
+- **StyleTTS2** — Maps emotions to diffusion preset parameters (alpha, beta, embedding_scale)
 
-The **exaggeration** parameter (available in generation settings) controls how dramatically the engine expresses the detected emotion.
+Engine-specific generation parameters (such as Chatterbox's `exaggeration`, `cfg_weight`, and `temperature`) are exposed as **engine-specific controls** in the chunk and generation settings. These override the automatic emotion-to-parameter mapping when set explicitly.
 
 ## Next Steps
 

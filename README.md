@@ -46,6 +46,8 @@ Upload an ebook, and VoxLibris will:
 - **Multi-voice output** — Assign different voices to the narrator and each detected character
 - **Engine-agnostic architecture** — Plug in any TTS engine that implements two REST endpoints. Swap between Chatterbox, XTTSv2, StyleTTS2, Edge TTS, and more without touching application code
 - **Voice cloning** — Upload a short audio sample and clone it as a character voice (engine-dependent)
+- **AI voice analysis** — Automatically extract display name, gender, accent, and a speech transcript from any custom voice sample or VCTK library entry using a vision-capable LLM
+- **Engine-specific parameters** — Engines declare their own tunable controls (e.g., Chatterbox exposes Exaggeration, CFG Weight, Temperature). VoxLibris auto-discovers them on registration and presents them as UI controls
 - **Hierarchical project editor** — Book → Chapter → Section → Chunk tree with cascading settings overrides at every level
 - **Per-chunk control** — Override speaker, emotion, voice, speed, pitch, and engine for any individual chunk and regenerate just that segment
 - **Emotion prosody weights** — Fine-tune how each emotion maps to pitch, speed, volume, and intensity adjustments per engine
@@ -235,7 +237,7 @@ When adding the engine to VoxLibris (**Settings → TTS Engine Management**), pa
 | `engines/openvoice-v2` | OpenVoice V2 | ✅ |
 | `engines/indextts2` | IndexTTS2 | ✅ |
 
-VoxLibris handles cold-start warm-up automatically — it polls the engine after registration and shows a progress indicator until the Space is ready.
+VoxLibris handles cold-start warm-up automatically — it polls the engine every 5 seconds (with a 5-second per-request timeout) for up to 10 minutes, and shows a progress indicator in the Jobs view until the Space is ready.
 
 ## How It Works
 
@@ -302,11 +304,12 @@ You can also use any other OpenAI-compatible endpoint (a local Ollama instance, 
 | `DATABASE_URL` | ✅ | PostgreSQL connection string (`postgresql://user:pass@host:5432/db`) |
 | `SESSION_SECRET` | ✅ | Random string used to sign session cookies — generate with `openssl rand -hex 32` |
 | `AI_INTEGRATIONS_OPENROUTER_BASE_URL` | Recommended | Base URL for the OpenAI-compatible LLM endpoint (default: OpenRouter) |
-| `AI_INTEGRATIONS_OPENROUTER_API_KEY` | Recommended | API key for the LLM endpoint — required for text segmentation |
+| `AI_INTEGRATIONS_OPENROUTER_API_KEY` | Recommended | API key for the LLM endpoint — required for text segmentation and voice analysis |
 | `PORT` | No | Port the Node server listens on (default: `5000`) |
 | `PYTHON_BACKEND_URL` | No | Override the Python backend URL (default: `http://127.0.0.1:8000`) |
 | `CORS_ALLOWED_ORIGINS` | No | Comma-separated allowed origins for the Python backend (default: `http://localhost:5000`) |
 | `OPENAI_API_KEY` | No | Required only if using OpenAI TTS voices directly |
+| `VOICE_ANALYSIS_MODEL` | No | LLM model used for AI voice analysis (default: `google/gemini-2.5-flash`) |
 
 ### In-App Settings
 
@@ -340,7 +343,12 @@ Returns engine capabilities, available voices, and supported emotions.
   "max_seconds_per_conversion": 30,
   "supports_voice_cloning": true,
   "builtin_voices": [...],
-  "supported_emotions": ["neutral", "happy", "sad", "angry", ...]
+  "supported_emotions": ["neutral", "happy", "sad", "angry", "fear", "surprise", "disgust", "excited", "calm", "confused", "anxious", "hopeful", "melancholy", "fearful"],
+  "engine_params": [
+    { "short_name": "exaggeration", "friendly_name": "Exaggeration", "data_type": "float", "min_value": 0.25, "max_value": 2.0, "default_value": 0.5 },
+    { "short_name": "cfg_weight", "friendly_name": "CFG Weight", "data_type": "float", "min_value": 0.0, "max_value": 1.0, "default_value": 0.5 },
+    { "short_name": "temperature", "friendly_name": "Temperature", "data_type": "float", "min_value": 0.05, "max_value": 5.0, "default_value": 0.8 }
+  ]
 }
 ```
 
@@ -356,7 +364,12 @@ Accepts text, voice selection, emotion, and prosody parameters; returns a PCM WA
   "emotion_set": ["happy", "excited"],
   "intensity": 70,
   "speed_adjust": 1.5,
-  "pitch_adjust": -0.5
+  "pitch_adjust": -0.5,
+  "engine_options": {
+    "exaggeration": 0.7,
+    "cfg_weight": 0.3,
+    "temperature": 0.85
+  }
 }
 ```
 

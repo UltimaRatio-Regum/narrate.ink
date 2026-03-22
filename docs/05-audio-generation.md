@@ -36,7 +36,7 @@ Before starting generation, you can configure:
 | **Speed** | Playback speed adjustment (0.5x - 2.0x) |
 | **Pitch** | Pitch adjustment |
 | **Emotion** | Emotion intensity for supported engines |
-| **Exaggeration** | How strongly emotions affect prosody |
+| **Engine-specific params** | Additional controls declared by the engine (e.g., Chatterbox exposes `Exaggeration`, `CFG Weight`, and `Temperature`). These are discovered automatically when the engine is registered and override the default emotion-to-parameter mapping when set. |
 
 ## Monitoring Jobs
 

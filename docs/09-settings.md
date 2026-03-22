@@ -26,12 +26,16 @@ Set the default voice used for new projects. This is used for the narrator and a
 Manage your personal voice library for voice cloning:
 
 - **Add Voice** — Upload a WAV or MP3 sample
+- **Analyze** — Run AI analysis to automatically extract display name, gender, accent, and a transcript summary (requires OpenRouter API key)
 - **Edit** — Update the name, description, or voice text transcript
 - **Delete** — Remove a custom voice
 - **Preview** — Listen to your voice sample
 
 ### Voice Text
 Some engines produce better cloning results when you provide a text transcript of your voice sample. The engine uses this to better understand the speech patterns in your sample.
+
+### Voice Analysis
+The **Analyze** button sends selected voice samples to a vision-capable LLM and writes back structured metadata. See [Voice Selection](./voices) for details on what is extracted and how to get the best results.
 
 ## Remote TTS Engines
 
@@ -51,12 +55,30 @@ Register and manage external TTS services:
 | **Shared** | Whether all users can access this engine (admin toggle) |
 | **Status** | Connection status (online, warming up, offline) |
 
+### Engine-Specific Parameters
+
+When an engine is registered, VoxLibris reads its `engine_params` declaration from `GetEngineDetails` and presents those parameters as UI controls in generation settings and the chunk editor. For example, Chatterbox exposes:
+
+| Parameter | Range | Description |
+|-----------|-------|-------------|
+| **Exaggeration** | 0.25 – 2.0 | Controls how dramatically emotions are expressed |
+| **CFG Weight** | 0.0 – 1.0 | Classifier-free guidance strength |
+| **Temperature** | 0.05 – 5.0 | Sampling randomness |
+
+Engine-specific parameters override the automatic emotion-to-parameter mapping when set explicitly. Each engine defines its own set; parameters are discovered automatically and require no configuration in VoxLibris.
+
+### Engine Concurrency
+
+Control how many jobs each engine can run in parallel via **Settings → Engine Concurrency**. Lowering this prevents a single engine from being overwhelmed by simultaneous requests; increasing it can improve throughput when you have multiple GPU workers behind one endpoint.
+
 ### Warm-up Behavior
 Some remote engines (especially on HuggingFace Spaces) need to warm up from a cold start:
-- The system automatically polls the engine during warm-up
-- A progress indicator shows the warm-up status
+- The system automatically polls the engine every 5 seconds during warm-up
+- Each poll has a 5-second timeout, giving ~10 seconds between attempts when the engine is unresponsive
+- Warm-up will wait up to **10 minutes** (600 seconds) before marking the engine as unavailable
+- A progress indicator shows the warm-up status in the Jobs view
 - You can cancel the warm-up if needed
-- Once warm, the engine stays available until it goes to sleep
+- Once warm, the engine stays available until it goes to sleep again
 
 ## Parsing Prompt
 

@@ -34,6 +34,8 @@ The Voice Library provides pre-recorded voice samples from the VCTK corpus. Thes
 - Filter by gender, accent, or characteristics
 - Library voices use the `library:` prefix (e.g., `library:p232`)
 
+Administrators can run AI analysis on Voice Library entries (via **Settings → Voice Library → Analyze**) to populate speaker metadata (name, gender, language, location, transcript) using the same LLM pipeline as custom voice analysis.
+
 ## Custom Voices
 
 Upload your own voice recordings to create custom voices for cloning:
@@ -43,6 +45,22 @@ Upload your own voice recordings to create custom voices for cloning:
 3. Upload a clean audio sample (WAV or MP3, 5-30 seconds recommended)
 4. Provide a name and optional description
 5. Optionally add a text transcript of the sample for better cloning
+
+### AI Voice Analysis
+
+After uploading a voice sample, you can run AI analysis to automatically extract metadata:
+
+1. Select one or more custom voices in the **Custom Voices** list
+2. Click **Analyze** — VoxLibris sends the audio to a vision-capable LLM (via OpenRouter)
+3. The AI returns:
+   - **Suggested display name** — A descriptive name based on the voice characteristics
+   - **Gender** — Male / Female / Androgynous
+   - **Accent** — Primary language and region (e.g., "American English", "British RP")
+   - **Summary** — A transcript or description of the sample content
+
+This metadata is saved with the voice and shown in voice selection lists, making it easier to identify and search voices.
+
+> **Requires** `AI_INTEGRATIONS_OPENROUTER_API_KEY` to be set. The model used can be overridden with the `VOICE_ANALYSIS_MODEL` environment variable (default: `google/gemini-2.5-flash`).
 
 ### Tips for Good Voice Samples
 
