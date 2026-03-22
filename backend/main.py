@@ -934,6 +934,250 @@ async def upload_voice_to_library(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _unique_voice_name(base_name: str, reserved: set) -> str:
+    """Return base_name, or base_name (1), (2), ... if it conflicts with reserved."""
+    if base_name not in reserved:
+        return base_name
+    i = 1
+    while True:
+        candidate = f"{base_name} ({i})"
+        if candidate not in reserved:
+            return candidate
+        i += 1
+
+
+@app.post("/voice-library-db/batch-upload")
+async def batch_upload_voices(
+    request: FastAPIRequest,
+    files: list[UploadFile] = File(...),
+    analyze: str = Form("true"),
+):
+    """Batch-upload multiple voice files to the voice library (admin only).
+
+    Returns per-file results and, if analyze=true, runs AI metadata analysis
+    on all successfully imported voices.
+    """
+    import hashlib
+    import tempfile
+
+    user_id, user_role = _get_user_info(request)
+    if user_role != "administrator":
+        raise HTTPException(status_code=403, detail="Only administrators can batch-upload to the voice library")
+
+    run_analysis = analyze.lower() in ("true", "1", "yes")
+
+    import hashlib as _hashlib_mod
+
+    db = get_db_session()
+    try:
+        # Backfill audio_hash for any existing entries that pre-date the column
+        unhashed = db.query(VoiceLibraryEntry).filter(
+            VoiceLibraryEntry.audio_hash.is_(None),
+            VoiceLibraryEntry.audio_data.isnot(None),
+        ).all()
+        if unhashed:
+            for entry in unhashed:
+                entry.audio_hash = _hashlib_mod.sha256(entry.audio_data).hexdigest()
+            db.commit()
+
+        # Build set of names already in the DB
+        existing_names: set = {row.name for row in db.query(VoiceLibraryEntry.name).all()}
+        # Build hash -> name map for all existing entries (now includes backfilled entries)
+        existing_hashes: dict = {
+            row.audio_hash: row.name
+            for row in db.query(VoiceLibraryEntry.audio_hash, VoiceLibraryEntry.name).filter(VoiceLibraryEntry.audio_hash.isnot(None)).all()
+        }
+    finally:
+        db.close()
+
+    results: list[dict] = []
+    imported_ids: list[str] = []
+    seen_hashes_this_batch: dict[str, str] = {}  # hash -> filename first seen
+
+    for upload in files:
+        filename = upload.filename or "unknown"
+        try:
+            audio_bytes = await upload.read()
+            file_hash = hashlib.sha256(audio_bytes).hexdigest()
+
+            # Dedup: already in DB
+            if file_hash in existing_hashes:
+                results.append({
+                    "filename": filename,
+                    "status": "duplicate",
+                    "reason": f"Identical audio already exists in the voice library as '{existing_hashes[file_hash]}'",
+                    "voice_id": None,
+                    "name": None,
+                })
+                continue
+
+            # Dedup: another file in this batch has the same content
+            if file_hash in seen_hashes_this_batch:
+                results.append({
+                    "filename": filename,
+                    "status": "duplicate",
+                    "reason": f"Identical content already imported in this batch as '{seen_hashes_this_batch[file_hash]}'",
+                    "voice_id": None,
+                    "name": None,
+                })
+                continue
+
+            seen_hashes_this_batch[file_hash] = filename
+
+            # Derive name from filename (strip extension, normalise separators)
+            stem = Path(filename).stem.replace("_", " ").replace("-", " ").strip()
+            base_name = stem or "Voice Sample"
+
+            # Get duration
+            duration = 0.0
+            try:
+                with tempfile.NamedTemporaryFile(suffix=Path(filename).suffix or ".wav", delete=True) as tmp:
+                    tmp.write(audio_bytes)
+                    tmp.flush()
+                    duration = audio_processor.get_audio_duration(tmp.name)
+            except Exception:
+                pass
+
+            voice_id = f"custom_{uuid.uuid4().hex[:8]}"
+            name = _unique_voice_name(base_name, existing_names)
+            existing_names.add(name)
+            existing_hashes[file_hash] = name
+
+            db = get_db_session()
+            try:
+                entry = VoiceLibraryEntry(
+                    id=voice_id,
+                    name=name,
+                    gender="U",
+                    age=0,
+                    language="",
+                    location="",
+                    transcript=None,
+                    duration=duration,
+                    audio_data=audio_bytes,
+                    audio_hash=file_hash,
+                    is_shared=True,
+                    user_id=user_id,
+                )
+                db.add(entry)
+                db.commit()
+            finally:
+                db.close()
+
+            imported_ids.append(voice_id)
+            results.append({
+                "filename": filename,
+                "status": "imported",
+                "reason": None,
+                "voice_id": voice_id,
+                "name": name,
+            })
+
+        except Exception as exc:
+            logger.error(f"Batch upload failed for {filename}: {exc}")
+            results.append({
+                "filename": filename,
+                "status": "error",
+                "reason": str(exc),
+                "voice_id": None,
+                "name": None,
+            })
+
+    # Optionally run AI analysis on all successfully imported voices
+    analysis_results: list[dict] = []
+    if run_analysis and imported_ids:
+        import httpx
+        import base64
+        import json as _json
+
+        openrouter_base_url = os.environ.get("AI_INTEGRATIONS_OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+        openrouter_api_key = os.environ.get("AI_INTEGRATIONS_OPENROUTER_API_KEY", "")
+        model = os.environ.get("VOICE_ANALYSIS_MODEL", "google/gemini-2.5-flash")
+        gender_map = {"male": "M", "female": "F", "androgynous": "U"}
+
+        if openrouter_api_key:
+            system_prompt, user_prompt = _load_voice_analysis_prompts()
+            # Collect current names to ensure uniqueness when renaming
+            db = get_db_session()
+            try:
+                current_names: set = {row.name for row in db.query(VoiceLibraryEntry.name).all()}
+            finally:
+                db.close()
+
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                for voice_id in imported_ids:
+                    db = get_db_session()
+                    try:
+                        voice = db.query(VoiceLibraryEntry).filter(VoiceLibraryEntry.id == voice_id).first()
+                        if not voice or not voice.audio_data:
+                            analysis_results.append({"voice_id": voice_id, "success": False, "error": "Not found"})
+                            continue
+
+                        audio_b64 = base64.b64encode(voice.audio_data).decode("utf-8")
+                        messages = [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": [
+                                {"type": "text", "text": user_prompt},
+                                {"type": "image_url", "image_url": {"url": f"data:audio/wav;base64,{audio_b64}"}}
+                            ]}
+                        ]
+                        try:
+                            resp = await client.post(
+                                f"{openrouter_base_url}/chat/completions",
+                                headers={"Authorization": f"Bearer {openrouter_api_key}", "Content-Type": "application/json"},
+                                json={"model": model, "messages": messages},
+                            )
+                            resp.raise_for_status()
+                            content = resp.json()["choices"][0]["message"]["content"].strip()
+                            if content.startswith("```"):
+                                content = content.split("\n", 1)[-1]
+                                if content.endswith("```"):
+                                    content = content[:-3].strip()
+                            analysis = _json.loads(content)
+
+                            suggested = analysis.get("suggested_display_name")
+                            # Remove the current name from the reserved set so the voice
+                            # can be renamed back to its own base name if needed
+                            current_names.discard(voice.name)
+                            base = f"{suggested} - {voice.name}" if suggested else voice.name
+                            new_name = _unique_voice_name(base, current_names)
+                            current_names.add(new_name)
+
+                            raw_gender = (analysis.get("gender") or "").lower()
+                            accent = analysis.get("accent") or {}
+                            voice.name = new_name
+                            voice.gender = gender_map.get(raw_gender, voice.gender)
+                            voice.language = accent.get("primary") or voice.language
+                            voice.location = accent.get("region_family") or voice.location
+                            voice.transcript = analysis.get("summary") or voice.transcript
+                            voice.metadata_json = _json.dumps(analysis)
+                            db.commit()
+
+                            # Update the matching result entry with the final name
+                            for r in results:
+                                if r.get("voice_id") == voice_id:
+                                    r["name"] = new_name
+                                    break
+
+                            analysis_results.append({"voice_id": voice_id, "success": True, "error": None})
+                        except Exception as exc:
+                            logger.error(f"Batch analysis failed for {voice_id}: {exc}")
+                            analysis_results.append({"voice_id": voice_id, "success": False, "error": str(exc)})
+                    finally:
+                        db.close()
+        else:
+            for voice_id in imported_ids:
+                analysis_results.append({"voice_id": voice_id, "success": False, "error": "OpenRouter API key not configured"})
+
+    return {
+        "results": results,
+        "analysis_results": analysis_results,
+        "imported_count": len(imported_ids),
+        "duplicate_count": sum(1 for r in results if r["status"] == "duplicate"),
+        "error_count": sum(1 for r in results if r["status"] == "error"),
+    }
+
+
 @app.delete("/voice-library-db/{voice_id}")
 async def delete_voice_from_library(voice_id: str, request: FastAPIRequest):
     """Delete a voice from the PostgreSQL voice library."""

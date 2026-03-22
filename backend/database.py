@@ -209,6 +209,7 @@ class VoiceLibraryEntry(Base):
     audio_data = Column(LargeBinary, nullable=False)
     alt_audio_data = Column(LargeBinary, nullable=True)
     is_shared = Column(Boolean, nullable=False, default=True)
+    audio_hash = Column(String(64), nullable=True, index=True)
     metadata_json = Column(Text, nullable=True)
     user_id = Column(String, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
@@ -401,6 +402,7 @@ def _migrate_columns(db_engine):
         ("custom_voices", "language", "ALTER TABLE custom_voices ADD COLUMN language VARCHAR"),
         ("custom_voices", "transcript", "ALTER TABLE custom_voices ADD COLUMN transcript TEXT"),
         ("custom_voices", "metadata_json", "ALTER TABLE custom_voices ADD COLUMN metadata_json TEXT"),
+        ("voice_library", "audio_hash", "ALTER TABLE voice_library ADD COLUMN audio_hash VARCHAR(64)"),
     ]
     
     with db_engine.connect() as conn:

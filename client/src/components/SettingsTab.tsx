@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Save, RotateCcw, Volume2, Gauge, Music, Zap, Plus, Trash2, RefreshCw, Play, Pause, Upload, Server, Mic, Pencil, Layers, Loader2, Sparkles } from "lucide-react";
+import { Save, RotateCcw, Volume2, Gauge, Music, Zap, Plus, Trash2, RefreshCw, Play, Pause, Upload, Server, Mic, Pencil, Layers, Loader2, Sparkles, FolderUp, CheckCircle2, XCircle, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -574,6 +574,18 @@ export function SettingsTab() {
   const [playingVoiceId, setPlayingVoiceId] = useState<string | null>(null);
   const voiceAudioRef = useRef<HTMLAudioElement | null>(null);
   const [selectedVoiceIds, setSelectedVoiceIds] = useState<Set<string>>(new Set());
+  const batchUploadRef = useRef<HTMLInputElement>(null);
+  const [batchDialogOpen, setBatchDialogOpen] = useState(false);
+  const [batchFiles, setBatchFiles] = useState<File[]>([]);
+  const [batchAnalyze, setBatchAnalyze] = useState(true);
+  const [batchResultsOpen, setBatchResultsOpen] = useState(false);
+  const [batchResults, setBatchResults] = useState<{
+    results: Array<{ filename: string; status: "imported" | "duplicate" | "error"; reason: string | null; voice_id: string | null; name: string | null }>;
+    analysis_results: Array<{ voice_id: string; success: boolean; error: string | null }>;
+    imported_count: number;
+    duplicate_count: number;
+    error_count: number;
+  } | null>(null);
 
   const [parsingPromptText, setParsingPromptText] = useState("");
   const [parsingPromptLoaded, setParsingPromptLoaded] = useState(false);
@@ -792,6 +804,31 @@ export function SettingsTab() {
     },
     onError: (error: Error) => {
       toast({ title: "Analysis failed", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const batchUploadMutation = useMutation({
+    mutationFn: async ({ files, analyze }: { files: File[]; analyze: boolean }) => {
+      const formData = new FormData();
+      files.forEach((f) => formData.append("files", f));
+      formData.append("analyze", String(analyze));
+      const res = await fetch("/api/voice-library-db/batch-upload", { method: "POST", body: formData });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: "Upload failed" }));
+        throw new Error(err.detail || "Upload failed");
+      }
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/voice-library-db"] });
+      setBatchDialogOpen(false);
+      setBatchFiles([]);
+      setBatchAnalyze(true);
+      setBatchResults(data);
+      setBatchResultsOpen(true);
+    },
+    onError: (error: Error) => {
+      toast({ title: "Batch upload failed", description: error.message, variant: "destructive" });
     },
   });
 
@@ -1226,7 +1263,7 @@ export function SettingsTab() {
                 Manage voice samples stored in the database for voice cloning
               </CardDescription>
             </div>
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap">
               <Button
                 variant="outline"
                 size="sm"
@@ -1256,6 +1293,17 @@ export function SettingsTab() {
                 <Upload className="h-4 w-4 mr-1" />
                 {uploadVoiceMutation.isPending ? "Uploading..." : "Upload Voice"}
               </Button>
+              {isAdmin && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setBatchDialogOpen(true)}
+                  data-testid="button-batch-upload-voices"
+                >
+                  <FolderUp className="h-4 w-4 mr-1" />
+                  Batch Import
+                </Button>
+              )}
             </div>
           </div>
         </CardHeader>
@@ -1531,6 +1579,141 @@ export function SettingsTab() {
           </div>
         </CardContent>
       </Card>}
+
+      {/* Batch Import Dialog */}
+      <Dialog open={batchDialogOpen} onOpenChange={(open) => {
+        setBatchDialogOpen(open);
+        if (!open) { setBatchFiles([]); setBatchAnalyze(true); }
+      }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Batch Import Voices</DialogTitle>
+            <DialogDescription>
+              Select multiple audio files to import into the Voice Library. Duplicate audio content is detected automatically and skipped.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label>Audio Files</Label>
+              <input
+                ref={batchUploadRef}
+                type="file"
+                accept=".wav,.mp3,.ogg,.flac"
+                multiple
+                className="hidden"
+                onChange={(e) => setBatchFiles(Array.from(e.target.files ?? []))}
+              />
+              <Button
+                variant="outline"
+                className="w-full justify-start"
+                onClick={() => batchUploadRef.current?.click()}
+              >
+                <FolderUp className="h-4 w-4 mr-2" />
+                {batchFiles.length > 0
+                  ? `${batchFiles.length} file${batchFiles.length > 1 ? "s" : ""} selected`
+                  : "Select audio files..."}
+              </Button>
+              {batchFiles.length > 0 && (
+                <ScrollArea className="max-h-40 rounded-md border p-2">
+                  <ul className="space-y-1">
+                    {batchFiles.map((f, i) => (
+                      <li key={i} className="text-xs text-muted-foreground truncate">{f.name}</li>
+                    ))}
+                  </ul>
+                </ScrollArea>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="batch-analyze"
+                checked={batchAnalyze}
+                onCheckedChange={(v) => setBatchAnalyze(!!v)}
+              />
+              <Label htmlFor="batch-analyze" className="cursor-pointer">
+                Analyze voices with AI after import (auto-fill metadata)
+              </Label>
+            </div>
+            {!batchAnalyze && (
+              <p className="text-xs text-muted-foreground pl-6">
+                Voices will be named from their filenames. You can run analysis later by selecting them and clicking <strong>Analyze Selected</strong>.
+              </p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              onClick={() => batchUploadMutation.mutate({ files: batchFiles, analyze: batchAnalyze })}
+              disabled={batchFiles.length === 0 || batchUploadMutation.isPending}
+            >
+              {batchUploadMutation.isPending
+                ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />{batchAnalyze ? "Importing & Analyzing..." : "Importing..."}</>
+                : <><FolderUp className="h-4 w-4 mr-2" />Import {batchFiles.length > 0 ? `${batchFiles.length} File${batchFiles.length > 1 ? "s" : ""}` : "Files"}</>}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Batch Import Results Dialog */}
+      <Dialog open={batchResultsOpen} onOpenChange={setBatchResultsOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Import Results</DialogTitle>
+            {batchResults && (
+              <DialogDescription>
+                {batchResults.imported_count} imported
+                {batchResults.duplicate_count > 0 && `, ${batchResults.duplicate_count} duplicate${batchResults.duplicate_count > 1 ? "s" : ""} skipped`}
+                {batchResults.error_count > 0 && `, ${batchResults.error_count} error${batchResults.error_count > 1 ? "s" : ""}`}
+              </DialogDescription>
+            )}
+          </DialogHeader>
+          {batchResults && (
+            <ScrollArea className="max-h-[400px] pr-1">
+              <div className="space-y-2 py-2">
+                {batchResults.results.map((r, i) => {
+                  const analysisResult = batchResults.analysis_results.find((a) => a.voice_id === r.voice_id);
+                  return (
+                    <div key={i} className="flex items-start gap-3 rounded-md border p-3 text-sm">
+                      <div className="mt-0.5 shrink-0">
+                        {r.status === "imported" ? (
+                          <CheckCircle2 className="h-4 w-4 text-green-500" />
+                        ) : r.status === "duplicate" ? (
+                          <Copy className="h-4 w-4 text-yellow-500" />
+                        ) : (
+                          <XCircle className="h-4 w-4 text-destructive" />
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium truncate">{r.filename}</p>
+                        {r.status === "imported" && r.name && (
+                          <p className="text-xs text-muted-foreground">
+                            Imported as <span className="font-medium text-foreground">{r.name}</span>
+                            {analysisResult && (
+                              analysisResult.success
+                                ? " · analyzed"
+                                : <span className="text-destructive"> · analysis failed: {analysisResult.error}</span>
+                            )}
+                          </p>
+                        )}
+                        {(r.status === "duplicate" || r.status === "error") && r.reason && (
+                          <p className="text-xs text-muted-foreground">{r.reason}</p>
+                        )}
+                      </div>
+                      <Badge
+                        variant={r.status === "imported" ? "default" : r.status === "duplicate" ? "secondary" : "destructive"}
+                        className="shrink-0 text-xs"
+                      >
+                        {r.status}
+                      </Badge>
+                    </div>
+                  );
+                })}
+              </div>
+            </ScrollArea>
+          )}
+          <DialogFooter>
+            <Button onClick={() => setBatchResultsOpen(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
