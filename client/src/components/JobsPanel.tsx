@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { 
-  Clock, Play, Pause, Trash2, X, RefreshCw, CheckCircle, AlertCircle, 
+import {
+  Clock, Play, Pause, Trash2, X, RefreshCw, CheckCircle, AlertCircle,
   Loader2, Download, ChevronDown, ChevronRight, Volume2, RotateCcw,
-  ChevronLeft
+  ChevronLeft, ChevronsLeft, ChevronsRight, ArrowUpDown
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,6 +12,9 @@ import { Badge } from "@/components/ui/badge";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
 import type { TTSJob, TTSSegmentStatus } from "@shared/schema";
 
 const PAGE_SIZE = 20;
@@ -27,18 +30,41 @@ interface JobsPanelProps {
   onPlayAudio?: (url: string) => void;
 }
 
+type StatusFilter = "all" | "running" | "waiting" | "completed" | "failed";
+type SortOrder = "desc" | "asc";
+
+const STATUS_FILTER_OPTIONS: { value: StatusFilter; label: string }[] = [
+  { value: "all",       label: "All Jobs" },
+  { value: "running",   label: "Running Jobs" },
+  { value: "waiting",   label: "Waiting Jobs" },
+  { value: "completed", label: "Completed Jobs" },
+  { value: "failed",    label: "Failed Jobs" },
+];
+
 export function JobsPanel({ onPlayAudio }: JobsPanelProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [expandedJob, setExpandedJob] = useState<string | null>(null);
   const [playingSegment, setPlayingSegment] = useState<string | null>(null);
   const [page, setPage] = useState(0);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
+  // Reset to page 0 when filter or sort changes
+  const handleFilterChange = (v: StatusFilter) => { setStatusFilter(v); setPage(0); };
+  const handleSortChange = (v: SortOrder) => { setSortOrder(v); setPage(0); };
+
   const { data: jobsData, isLoading } = useQuery<JobsResponse>({
-    queryKey: ["/api/jobs", { limit: PAGE_SIZE, offset: page * PAGE_SIZE }],
+    queryKey: ["/api/jobs", { limit: PAGE_SIZE, offset: page * PAGE_SIZE, statusFilter, sortOrder }],
     queryFn: async () => {
-      const res = await fetch(`/api/jobs?limit=${PAGE_SIZE}&offset=${page * PAGE_SIZE}`, { credentials: "include" });
+      const params = new URLSearchParams({
+        limit: String(PAGE_SIZE),
+        offset: String(page * PAGE_SIZE),
+        status_filter: statusFilter,
+        sort_order: sortOrder,
+      });
+      const res = await fetch(`/api/jobs?${params}`, { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch jobs");
       return res.json();
     },
@@ -52,10 +78,6 @@ export function JobsPanel({ onPlayAudio }: JobsPanelProps) {
   const jobs = jobsData?.jobs ?? [];
   const totalJobs = jobsData?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(totalJobs / PAGE_SIZE));
-
-  const hasFinishedJobs = jobs.some(j => 
-    j.status === "completed" || j.status === "failed" || j.status === "cancelled"
-  );
 
   const { data: segmentsData } = useQuery<{ segments: TTSSegmentStatus[] }>({
     queryKey: ["/api/jobs", expandedJob, "segments"],
@@ -238,7 +260,7 @@ export function JobsPanel({ onPlayAudio }: JobsPanelProps) {
   return (
     <Card data-testid="jobs-panel">
       <CardHeader className="pb-3">
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
           <CardTitle className="text-base flex items-center gap-2">
             <RefreshCw className="h-4 w-4" />
             Generation Jobs
@@ -246,24 +268,42 @@ export function JobsPanel({ onPlayAudio }: JobsPanelProps) {
               <Badge variant="secondary" className="text-xs ml-1" data-testid="badge-jobs-total">{totalJobs}</Badge>
             )}
           </CardTitle>
-          <div className="flex items-center gap-2">
-            {hasFinishedJobs && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => clearCompletedMutation.mutate()}
-                disabled={clearCompletedMutation.isPending}
-                data-testid="clear-completed-jobs"
-                className="text-xs h-7"
-              >
-                {clearCompletedMutation.isPending ? (
-                  <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                ) : (
-                  <Trash2 className="h-3 w-3 mr-1" />
-                )}
-                Clear finished
-              </Button>
-            )}
+          <div className="flex items-center gap-2 flex-wrap">
+            <Select value={statusFilter} onValueChange={(v) => handleFilterChange(v as StatusFilter)}>
+              <SelectTrigger className="h-7 text-xs w-36" data-testid="select-jobs-filter">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {STATUS_FILTER_OPTIONS.map(o => (
+                  <SelectItem key={o.value} value={o.value} className="text-xs">{o.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={sortOrder} onValueChange={(v) => handleSortChange(v as SortOrder)}>
+              <SelectTrigger className="h-7 text-xs w-36" data-testid="select-jobs-sort">
+                <ArrowUpDown className="h-3 w-3 mr-1 shrink-0" />
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="desc" className="text-xs">Newest First</SelectItem>
+                <SelectItem value="asc" className="text-xs">Oldest First</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => clearCompletedMutation.mutate()}
+              disabled={clearCompletedMutation.isPending}
+              data-testid="clear-completed-jobs"
+              className="text-xs h-7"
+            >
+              {clearCompletedMutation.isPending ? (
+                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+              ) : (
+                <Trash2 className="h-3 w-3 mr-1" />
+              )}
+              Clear finished
+            </Button>
             {isLoading && <Loader2 className="h-4 w-4 animate-spin" />}
           </div>
         </div>
@@ -456,33 +496,59 @@ export function JobsPanel({ onPlayAudio }: JobsPanelProps) {
         </div>
 
         {totalPages > 1 && (
-          <div className="flex items-center justify-between pt-3 mt-3 border-t">
+          <div className="flex items-center justify-between pt-3 mt-3 border-t gap-2 flex-wrap">
             <span className="text-xs text-muted-foreground" data-testid="text-jobs-count">
               {totalJobs} job{totalJobs !== 1 ? "s" : ""} total
             </span>
             <div className="flex items-center gap-1">
               <Button
-                size="sm"
-                variant="outline"
-                className="h-7 w-7 p-0"
+                size="sm" variant="outline" className="h-7 w-7 p-0"
+                onClick={() => setPage(0)}
+                disabled={page === 0}
+                data-testid="button-jobs-first-page"
+                title="First page"
+              >
+                <ChevronsLeft className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                size="sm" variant="outline" className="h-7 w-7 p-0"
                 onClick={() => setPage(p => Math.max(0, p - 1))}
                 disabled={page === 0}
                 data-testid="button-jobs-prev-page"
               >
                 <ChevronLeft className="h-3.5 w-3.5" />
               </Button>
-              <span className="text-xs px-2" data-testid="text-jobs-page">
-                {page + 1} / {totalPages}
-              </span>
+              <Select
+                value={String(page + 1)}
+                onValueChange={(v) => setPage(Number(v) - 1)}
+              >
+                <SelectTrigger className="h-7 w-20 text-xs px-2" data-testid="select-jobs-page">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {Array.from({ length: totalPages }, (_, i) => (
+                    <SelectItem key={i + 1} value={String(i + 1)} className="text-xs">
+                      {i + 1} / {totalPages}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <Button
-                size="sm"
-                variant="outline"
-                className="h-7 w-7 p-0"
+                size="sm" variant="outline" className="h-7 w-7 p-0"
                 onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}
                 disabled={page >= totalPages - 1}
                 data-testid="button-jobs-next-page"
               >
                 <ChevronRight className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                size="sm" variant="outline" className="h-7 w-7 p-0"
+                onClick={() => setPage(totalPages - 1)}
+                disabled={page >= totalPages - 1}
+                data-testid="button-jobs-last-page"
+                title="Last page"
+              >
+                <ChevronsRight className="h-3.5 w-3.5" />
               </Button>
             </div>
           </div>

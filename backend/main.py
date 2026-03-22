@@ -1679,11 +1679,11 @@ async def create_tts_job(request: CreateJobRequest, req: FastAPIRequest):
 
 
 @app.get("/jobs")
-async def list_jobs(request: FastAPIRequest, include_completed: bool = True, limit: int = 20, offset: int = 0):
-    """List all TTS jobs with pagination."""
+async def list_jobs(request: FastAPIRequest, include_completed: bool = True, limit: int = 20, offset: int = 0, status_filter: str = "all", sort_order: str = "desc"):
+    """List all TTS jobs with pagination, optional status filter, and sort order."""
     user_id, user_role = _get_user_info(request)
     try:
-        return get_all_jobs(include_completed=include_completed, limit=limit, offset=offset, user_id=user_id, user_role=user_role)
+        return get_all_jobs(include_completed=include_completed, limit=limit, offset=offset, user_id=user_id, user_role=user_role, status_filter=status_filter, sort_order=sort_order)
     except Exception as e:
         logger.error(f"Failed to list jobs: {e}")
         raise HTTPException(status_code=500, detail=str(e))

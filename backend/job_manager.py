@@ -118,23 +118,39 @@ def _serialize_job(job: TTSJob) -> Dict[str, Any]:
     }
 
 
-def get_all_jobs(include_completed: bool = True, limit: int = 20, offset: int = 0, user_id: str = None, user_role: str = "user") -> Dict[str, Any]:
-    """Get all jobs with pagination, optionally filtering out completed ones."""
+_STATUS_FILTER_MAP = {
+    "running":   [JobStatus.PROCESSING.value, JobStatus.PENDING.value],
+    "waiting":   [JobStatus.WAITING.value],
+    "completed": [JobStatus.COMPLETED.value],
+    "failed":    [JobStatus.FAILED.value, JobStatus.CANCELLED.value],
+}
+
+
+def get_all_jobs(include_completed: bool = True, limit: int = 20, offset: int = 0,
+                 user_id: str = None, user_role: str = "user",
+                 status_filter: str = "all", sort_order: str = "desc") -> Dict[str, Any]:
+    """Get all jobs with pagination, optional status filter, and sort order."""
     db = get_db_session()
     try:
-        query = db.query(TTSJob).order_by(TTSJob.created_at.desc())
+        query = db.query(TTSJob)
         if not include_completed:
             query = query.filter(TTSJob.status.in_([
                 JobStatus.PENDING.value,
                 JobStatus.WAITING.value,
                 JobStatus.PROCESSING.value
             ]))
+        elif status_filter and status_filter != "all" and status_filter in _STATUS_FILTER_MAP:
+            query = query.filter(TTSJob.status.in_(_STATUS_FILTER_MAP[status_filter]))
         if user_id and user_role != "administrator":
             query = query.filter(TTSJob.user_id == user_id)
-        
+        if sort_order == "asc":
+            query = query.order_by(TTSJob.created_at.asc())
+        else:
+            query = query.order_by(TTSJob.created_at.desc())
+
         total = query.count()
         jobs = query.offset(offset).limit(limit).all()
-        
+
         jobs_list = [_serialize_job(job) for job in jobs]
         return {"jobs": jobs_list, "total": total, "limit": limit, "offset": offset}
     finally:
