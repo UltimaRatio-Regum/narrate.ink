@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Save, RotateCcw, Volume2, Gauge, Music, Zap, Plus, Trash2, RefreshCw, Play, Pause, Upload, Server, Mic, Pencil, Layers } from "lucide-react";
+import { Save, RotateCcw, Volume2, Gauge, Music, Zap, Plus, Trash2, RefreshCw, Play, Pause, Upload, Server, Mic, Pencil, Layers, Loader2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -32,10 +32,14 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { apiRequest } from "@/lib/queryClient";
+import { voiceLabel } from "@/lib/voice-label";
+import { VoiceSelectOptions } from "@/components/VoiceSelectOptions";
 import { TTS_ENGINES, isVoiceCloningEngine } from "@/lib/tts-engines";
 import type { TTSEngine, EdgeVoice } from "@shared/schema";
 import { useAuth } from "@/lib/auth";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 
 interface ProsodySettings {
   pitch: Record<string, number>;
@@ -78,6 +82,7 @@ interface VoiceLibraryItem {
   altAudioUrl: string | null;
   hasAudio: boolean;
   hasAltAudio: boolean;
+  metadata_json: string | null;
 }
 
 const DEFAULT_PROSODY: ProsodySettings = {
@@ -113,7 +118,19 @@ interface CustomVoiceEntry {
   duration: number;
   audioUrl: string;
   createdAt: string;
+  gender?: string | null;
+  language?: string | null;
+  transcript?: string | null;
+  metadata_json?: string | null;
 }
+
+const GENDER_OPTIONS = [
+  { value: "M", label: "Male" },
+  { value: "F", label: "Female" },
+  { value: "U", label: "Other / Unknown" },
+];
+
+const GENDER_DISPLAY: Record<string, string> = { M: "Male", F: "Female", U: "Other" };
 
 function CustomVoicesCard() {
   const { toast } = useToast();
@@ -127,27 +144,75 @@ function CustomVoicesCard() {
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
+  const [analyzingId, setAnalyzingId] = useState<string | null>(null);
+
+  // Upload dialog metadata state
+  const [analyzeVoice, setAnalyzeVoice] = useState(true);
+  const [uploadGender, setUploadGender] = useState("");
+  const [uploadAccent, setUploadAccent] = useState("");
+  const [uploadDescription, setUploadDescription] = useState("");
 
   const { data: customVoices = [], isLoading, isError } = useQuery<CustomVoiceEntry[]>({
     queryKey: ["/api/custom-voices"],
   });
 
+  const analyzeMutation = useMutation({
+    mutationFn: async (voiceIds: string[]) => {
+      const res = await apiRequest("POST", "/api/custom-voices/analyze", { voice_ids: voiceIds });
+      return res.json() as Promise<{ results: Array<{ voice_id: string; success: boolean; error: string | null; name: string | null }> }>;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/custom-voices"] });
+      setAnalyzingId(null);
+      const failed = data.results.filter((r) => !r.success);
+      if (failed.length === 0) {
+        toast({ title: "Analysis complete", description: `${data.results.length} voice(s) updated` });
+      } else {
+        toast({
+          title: `Analysis complete (${failed.length} error${failed.length > 1 ? "s" : ""})`,
+          description: failed.map((r) => r.error).join("; "),
+          variant: "destructive",
+        });
+      }
+    },
+    onError: (error: Error) => {
+      setAnalyzingId(null);
+      toast({ title: "Analysis failed", description: error.message, variant: "destructive" });
+    },
+  });
+
   const uploadMutation = useMutation({
-    mutationFn: async ({ name, file }: { name: string; file: File }) => {
+    mutationFn: async ({ name, file, gender, language, transcript }: {
+      name: string; file: File; gender: string; language: string; transcript: string;
+    }) => {
       const formData = new FormData();
       formData.append("name", name);
       formData.append("file", file);
+      if (gender) formData.append("gender", gender);
+      if (language) formData.append("language", language);
+      if (transcript) formData.append("transcript", transcript);
       const res = await fetch("/api/voices/upload", { method: "POST", body: formData });
       if (!res.ok) throw new Error("Upload failed");
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/custom-voices"] });
       queryClient.invalidateQueries({ queryKey: ["/api/voices"] });
+      const shouldAnalyze = analyzeVoice;
       setIsDialogOpen(false);
       setNewName("");
       setSelectedFile(null);
-      toast({ title: "Voice uploaded", description: "Custom voice saved successfully." });
+      setUploadGender("");
+      setUploadAccent("");
+      setUploadDescription("");
+      setAnalyzeVoice(true);
+      if (shouldAnalyze && data.id) {
+        setAnalyzingId(data.id);
+        analyzeMutation.mutate([data.id]);
+        toast({ title: "Voice uploaded", description: "Analyzing voice metadata..." });
+      } else {
+        toast({ title: "Voice uploaded", description: "Custom voice saved successfully." });
+      }
     },
     onError: () => {
       toast({ title: "Upload failed", description: "Could not upload the voice sample.", variant: "destructive" });
@@ -221,7 +286,17 @@ function CustomVoicesCard() {
               Upload and manage custom voice samples for voice cloning
             </CardDescription>
           </div>
-          <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+          <Dialog open={isDialogOpen} onOpenChange={(open) => {
+            setIsDialogOpen(open);
+            if (!open) {
+              setNewName("");
+              setSelectedFile(null);
+              setUploadGender("");
+              setUploadAccent("");
+              setUploadDescription("");
+              setAnalyzeVoice(true);
+            }
+          }}>
             <DialogTrigger asChild>
               <Button size="sm" data-testid="button-add-custom-voice">
                 <Plus className="h-4 w-4 mr-2" />
@@ -266,18 +341,78 @@ function CustomVoicesCard() {
                     {selectedFile ? selectedFile.name : "Select audio file..."}
                   </Button>
                 </div>
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="analyze-voice"
+                    checked={analyzeVoice}
+                    onCheckedChange={(v) => setAnalyzeVoice(!!v)}
+                  />
+                  <Label htmlFor="analyze-voice" className="cursor-pointer">
+                    Analyze voice with AI (auto-fill metadata)
+                  </Label>
+                </div>
+                <div className="grid gap-3 pl-6 border-l-2 border-muted">
+                  <div className="grid gap-2">
+                    <Label htmlFor="upload-gender">Gender</Label>
+                    <Select
+                      value={uploadGender}
+                      onValueChange={setUploadGender}
+                      disabled={analyzeVoice}
+                    >
+                      <SelectTrigger id="upload-gender" data-testid="select-upload-gender">
+                        <SelectValue placeholder="Select gender..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {GENDER_OPTIONS.map((o) => (
+                          <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="upload-accent">Accent</Label>
+                    <Input
+                      id="upload-accent"
+                      value={uploadAccent}
+                      onChange={(e) => setUploadAccent(e.target.value)}
+                      placeholder="e.g., General American, Received Pronunciation"
+                      disabled={analyzeVoice}
+                      data-testid="input-upload-accent"
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="upload-description">Description</Label>
+                    <Textarea
+                      id="upload-description"
+                      value={uploadDescription}
+                      onChange={(e) => setUploadDescription(e.target.value)}
+                      placeholder="Brief description of the voice..."
+                      rows={2}
+                      disabled={analyzeVoice}
+                      data-testid="input-upload-description"
+                    />
+                  </div>
+                </div>
               </div>
               <DialogFooter>
                 <Button
                   onClick={() => {
                     if (selectedFile && newName.trim()) {
-                      uploadMutation.mutate({ name: newName.trim(), file: selectedFile });
+                      uploadMutation.mutate({
+                        name: newName.trim(),
+                        file: selectedFile,
+                        gender: analyzeVoice ? "" : uploadGender,
+                        language: analyzeVoice ? "" : uploadAccent,
+                        transcript: analyzeVoice ? "" : uploadDescription,
+                      });
                     }
                   }}
                   disabled={!selectedFile || !newName.trim() || uploadMutation.isPending}
                   data-testid="button-upload-custom-voice"
                 >
-                  {uploadMutation.isPending ? "Uploading..." : "Upload Voice"}
+                  {uploadMutation.isPending
+                    ? (analyzeVoice ? "Uploading..." : "Uploading...")
+                    : "Upload Voice"}
                 </Button>
               </DialogFooter>
             </DialogContent>
@@ -354,11 +489,31 @@ function CustomVoicesCard() {
                           {voice.name}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          {formatDuration(voice.duration)}
+                          {[
+                            voice.gender ? GENDER_DISPLAY[voice.gender] ?? voice.gender : null,
+                            voice.language || null,
+                            formatDuration(voice.duration),
+                          ].filter(Boolean).join(" · ")}
                         </p>
                       </>
                     )}
                   </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="shrink-0"
+                    title="Analyze with AI"
+                    disabled={analyzingId === voice.id}
+                    onClick={() => {
+                      setAnalyzingId(voice.id);
+                      analyzeMutation.mutate([voice.id]);
+                    }}
+                    data-testid={`button-analyze-custom-${voice.id}`}
+                  >
+                    {analyzingId === voice.id
+                      ? <Loader2 className="h-4 w-4 animate-spin" />
+                      : <Sparkles className="h-4 w-4" />}
+                  </Button>
                   <Button
                     variant="ghost"
                     size="icon"
@@ -417,6 +572,8 @@ export function SettingsTab() {
   const [shareEngine, setShareEngine] = useState(false);
   const [testingEngineId, setTestingEngineId] = useState<string | null>(null);
   const [playingVoiceId, setPlayingVoiceId] = useState<string | null>(null);
+  const voiceAudioRef = useRef<HTMLAudioElement | null>(null);
+  const [selectedVoiceIds, setSelectedVoiceIds] = useState<Set<string>>(new Set());
 
   const [parsingPromptText, setParsingPromptText] = useState("");
   const [parsingPromptLoaded, setParsingPromptLoaded] = useState(false);
@@ -439,6 +596,21 @@ export function SettingsTab() {
 
   const { data: voiceLibraryDb, isLoading: voiceLibLoading } = useQuery<VoiceLibraryItem[]>({
     queryKey: ["/api/voice-library-db"],
+  });
+
+  const { data: favoritesData } = useQuery<{ voice_ids: string[] }>({
+    queryKey: ["/api/voice-favorites"],
+  });
+  const favoriteIds = new Set(favoritesData?.voice_ids ?? []);
+
+  const favoriteMutation = useMutation({
+    mutationFn: async ({ voiceId, add }: { voiceId: string; add: boolean }) => {
+      const response = await apiRequest(add ? "POST" : "DELETE", `/api/voice-favorites/${voiceId}`);
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/voice-favorites"] });
+    },
   });
 
   const { data: savedPromptData } = useQuery<{ prompt: string }>({
@@ -599,6 +771,30 @@ export function SettingsTab() {
     },
   });
 
+  const analyzeMutation = useMutation({
+    mutationFn: async (voiceIds: string[]) => {
+      const response = await apiRequest("POST", "/api/voice-library-db/analyze", { voice_ids: voiceIds });
+      return response.json() as Promise<{ results: Array<{ voice_id: string; success: boolean; error: string | null; name: string | null }> }>;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/voice-library-db"] });
+      setSelectedVoiceIds(new Set());
+      const failed = data.results.filter((r) => !r.success);
+      if (failed.length === 0) {
+        toast({ title: "Analysis complete", description: `${data.results.length} voice(s) updated` });
+      } else {
+        toast({
+          title: `Analysis complete (${failed.length} error${failed.length > 1 ? "s" : ""})`,
+          description: failed.map((r) => `${r.voice_id}: ${r.error}`).join("; "),
+          variant: "destructive",
+        });
+      }
+    },
+    onError: (error: Error) => {
+      toast({ title: "Analysis failed", description: error.message, variant: "destructive" });
+    },
+  });
+
   const handleEngineChange = (engine: string) => {
     setDefaultEngine(engine);
     setDefaultVoice("");
@@ -678,15 +874,22 @@ export function SettingsTab() {
   };
 
   const handlePlayVoice = (voiceId: string, audioUrl: string) => {
+    // Stop whatever is currently playing
+    if (voiceAudioRef.current) {
+      voiceAudioRef.current.pause();
+      voiceAudioRef.current = null;
+    }
+    // Toggle off if the same voice was playing
     if (playingVoiceId === voiceId) {
       setPlayingVoiceId(null);
       return;
     }
-    setPlayingVoiceId(voiceId);
     const audio = new Audio(audioUrl);
-    audio.onended = () => setPlayingVoiceId(null);
-    audio.onerror = () => setPlayingVoiceId(null);
-    audio.play().catch(() => setPlayingVoiceId(null));
+    voiceAudioRef.current = audio;
+    audio.onended = () => { voiceAudioRef.current = null; setPlayingVoiceId(null); };
+    audio.onerror = () => { voiceAudioRef.current = null; setPlayingVoiceId(null); };
+    setPlayingVoiceId(voiceId);
+    audio.play().catch(() => { voiceAudioRef.current = null; setPlayingVoiceId(null); });
   };
 
   const getVoiceOptions = () => {
@@ -699,7 +902,7 @@ export function SettingsTab() {
     if (showVoiceCloningOptions && voiceLibraryDb) {
       return voiceLibraryDb.map((v) => ({
         value: `library:${v.id}`,
-        label: v.name,
+        label: voiceLabel(v),
       }));
     }
     const remoteEngine = registeredEngines?.find(e => e.engine_id === defaultEngine);
@@ -762,11 +965,7 @@ export function SettingsTab() {
                   <SelectValue placeholder="Select voice" />
                 </SelectTrigger>
                 <SelectContent>
-                  {voiceOptions.map((opt) => (
-                    <SelectItem key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </SelectItem>
-                  ))}
+                  <VoiceSelectOptions opts={voiceOptions} favoriteIds={favoriteIds} />
                 </SelectContent>
               </Select>
             </div>
@@ -1027,7 +1226,18 @@ export function SettingsTab() {
                 Manage voice samples stored in the database for voice cloning
               </CardDescription>
             </div>
-            <div>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => analyzeMutation.mutate([...selectedVoiceIds])}
+                disabled={selectedVoiceIds.size === 0 || analyzeMutation.isPending}
+                data-testid="button-analyze-voices"
+              >
+                {analyzeMutation.isPending
+                  ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" />Analyzing...</>
+                  : "Analyze Selected"}
+              </Button>
               <input
                 ref={fileInputRef}
                 type="file"
@@ -1059,6 +1269,19 @@ export function SettingsTab() {
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead className="w-10">
+                      <Checkbox
+                        checked={voiceLibraryDb.length > 0 && voiceLibraryDb.every((v) => selectedVoiceIds.has(v.id))}
+                        onCheckedChange={(checked) => {
+                          if (checked) {
+                            setSelectedVoiceIds(new Set(voiceLibraryDb.map((v) => v.id)));
+                          } else {
+                            setSelectedVoiceIds(new Set());
+                          }
+                        }}
+                        aria-label="Select all voices"
+                      />
+                    </TableHead>
                     <TableHead>Name</TableHead>
                     <TableHead className="text-center">Gender</TableHead>
                     <TableHead className="text-center">Duration</TableHead>
@@ -1068,6 +1291,20 @@ export function SettingsTab() {
                 <TableBody>
                   {voiceLibraryDb.map((voice) => (
                     <TableRow key={voice.id} data-testid={`row-voice-${voice.id}`}>
+                      <TableCell>
+                        <Checkbox
+                          checked={selectedVoiceIds.has(voice.id)}
+                          onCheckedChange={(checked) => {
+                            setSelectedVoiceIds((prev) => {
+                              const next = new Set(prev);
+                              if (checked) next.add(voice.id);
+                              else next.delete(voice.id);
+                              return next;
+                            });
+                          }}
+                          aria-label={`Select ${voice.name}`}
+                        />
+                      </TableCell>
                       <TableCell>
                         <div className="font-medium">{voice.name}</div>
                         {voice.language && (
@@ -1084,6 +1321,14 @@ export function SettingsTab() {
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex gap-1 justify-end">
+                          <button
+                            className="text-lg leading-none px-1 text-yellow-400 hover:text-yellow-500 transition-colors"
+                            onClick={() => favoriteMutation.mutate({ voiceId: voice.id, add: !favoriteIds.has(voice.id) })}
+                            aria-label={favoriteIds.has(voice.id) ? "Unfavorite" : "Favorite"}
+                            data-testid={`button-favorite-voice-${voice.id}`}
+                          >
+                            {favoriteIds.has(voice.id) ? "★" : "☆"}
+                          </button>
                           {voice.hasAudio && (
                             <Button
                               size="icon"
@@ -1091,7 +1336,10 @@ export function SettingsTab() {
                               onClick={() => handlePlayVoice(voice.id, voice.audioUrl)}
                               data-testid={`button-play-voice-${voice.id}`}
                             >
-                              <Play className={`h-4 w-4 ${playingVoiceId === voice.id ? "text-primary" : ""}`} />
+                              {playingVoiceId === voice.id
+                                ? <Pause className="h-4 w-4 text-primary" />
+                                : <Play className="h-4 w-4" />
+                              }
                             </Button>
                           )}
                           <Button

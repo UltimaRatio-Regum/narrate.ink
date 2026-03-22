@@ -238,6 +238,9 @@ async def get_voices():
 async def upload_voice(
     request: FastAPIRequest,
     name: str = Form(...),
+    gender: str = Form(""),
+    language: str = Form(""),
+    transcript: str = Form(""),
     file: UploadFile = File(...),
 ):
     """Upload a voice sample for cloning, persisted to database"""
@@ -265,6 +268,9 @@ async def upload_voice(
                 audio_data=content,
                 file_ext=file_ext,
                 duration=duration,
+                gender=gender or None,
+                language=language or None,
+                transcript=transcript or None,
                 user_id=user_id,
             )
             db.add(entry)
@@ -318,6 +324,10 @@ async def list_custom_voices(request: FastAPIRequest):
                 "duration": v.duration,
                 "audioUrl": f"/custom-voices/{v.id}/audio",
                 "createdAt": v.created_at.isoformat() if v.created_at else "",
+                "gender": v.gender,
+                "language": v.language,
+                "transcript": v.transcript,
+                "metadata_json": v.metadata_json,
             }
             for v in voices
         ]
@@ -354,6 +364,139 @@ async def delete_voice(voice_id: str, request: FastAPIRequest):
         return {"success": True}
     finally:
         db.close()
+
+
+@app.patch("/custom-voices/{voice_id}")
+async def patch_custom_voice(voice_id: str, request: FastAPIRequest):
+    """Update metadata fields on a custom voice."""
+    user_id, user_role = _get_user_info(request)
+    body = await request.json()
+    db = get_db_session()
+    try:
+        voice = _require_voice_access(db, user_id, user_role, voice_id)
+        for field in ("name", "gender", "language", "transcript", "metadata_json"):
+            if field in body:
+                setattr(voice, field, body[field])
+        db.commit()
+        return {
+            "id": voice.id,
+            "name": voice.name,
+            "gender": voice.gender,
+            "language": voice.language,
+            "transcript": voice.transcript,
+            "metadata_json": voice.metadata_json,
+        }
+    finally:
+        db.close()
+
+
+_CUSTOM_VOICE_MIME_TYPES = {
+    ".wav": "audio/wav",
+    ".mp3": "audio/mpeg",
+    ".ogg": "audio/ogg",
+    ".flac": "audio/flac",
+    ".m4a": "audio/mp4",
+    ".aac": "audio/aac",
+    ".webm": "audio/webm",
+}
+
+
+@app.post("/custom-voices/analyze")
+async def analyze_custom_voices(request: FastAPIRequest):
+    """Run AI voice metadata analysis on selected custom voice entries."""
+    import httpx
+    import base64
+    import json as _json
+
+    user_id, user_role = _get_user_info(request)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    body = await request.json()
+    voice_ids: list[str] = body.get("voice_ids", [])
+    if not voice_ids:
+        raise HTTPException(status_code=400, detail="voice_ids is required")
+
+    openrouter_base_url = os.environ.get("AI_INTEGRATIONS_OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+    openrouter_api_key = os.environ.get("AI_INTEGRATIONS_OPENROUTER_API_KEY", "")
+    model = os.environ.get("VOICE_ANALYSIS_MODEL", "google/gemini-2.5-flash")
+
+    if not openrouter_api_key:
+        raise HTTPException(status_code=500, detail="OpenRouter API key not configured")
+
+    system_prompt, user_prompt = _load_voice_analysis_prompts()
+    gender_map = {"male": "M", "female": "F", "androgynous": "U"}
+
+    results = []
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        for voice_id in voice_ids:
+            db = get_db_session()
+            try:
+                try:
+                    voice = _require_voice_access(db, user_id, user_role, voice_id)
+                except HTTPException as e:
+                    results.append({"voice_id": voice_id, "success": False, "error": e.detail, "name": None})
+                    continue
+
+                if not voice.audio_data:
+                    results.append({"voice_id": voice_id, "success": False, "error": "No audio data", "name": None})
+                    continue
+
+                mime_type = _CUSTOM_VOICE_MIME_TYPES.get((voice.file_ext or ".wav").lower(), "audio/wav")
+                audio_b64 = base64.b64encode(voice.audio_data).decode("utf-8")
+
+                messages = [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": [
+                        {"type": "text", "text": user_prompt},
+                        {"type": "image_url", "image_url": {
+                            "url": f"data:{mime_type};base64,{audio_b64}"
+                        }}
+                    ]}
+                ]
+
+                try:
+                    resp = await client.post(
+                        f"{openrouter_base_url}/chat/completions",
+                        headers={
+                            "Authorization": f"Bearer {openrouter_api_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json={"model": model, "messages": messages},
+                    )
+                    resp.raise_for_status()
+                    content = resp.json()["choices"][0]["message"]["content"].strip()
+                    if content.startswith("```"):
+                        content = content.split("\n", 1)[-1]
+                        if content.endswith("```"):
+                            content = content[:-3].strip()
+
+                    analysis = _json.loads(content)
+
+                    suggested = analysis.get("suggested_display_name")
+                    new_name = f"{suggested} - {voice.name}" if suggested else voice.name
+                    raw_gender = (analysis.get("gender") or "").lower()
+                    new_gender = gender_map.get(raw_gender, voice.gender)
+                    accent = analysis.get("accent") or {}
+                    new_language = accent.get("primary") or voice.language
+                    new_transcript = analysis.get("summary") or voice.transcript
+
+                    voice.name = new_name
+                    voice.gender = new_gender
+                    voice.language = new_language
+                    voice.transcript = new_transcript
+                    voice.metadata_json = _json.dumps(analysis)
+                    db.commit()
+
+                    results.append({"voice_id": voice_id, "success": True, "error": None, "name": new_name})
+
+                except Exception as e:
+                    logger.error(f"Custom voice analysis failed for {voice_id}: {e}")
+                    results.append({"voice_id": voice_id, "success": False, "error": str(e), "name": None})
+            finally:
+                db.close()
+
+    return {"results": results}
 
 
 def format_location(location: str, language: str) -> str:
@@ -692,6 +835,7 @@ async def get_voice_library_db(request: FastAPIRequest):
                 "altAudioUrl": f"/api/voice-library-db/{v.id}/alt-audio" if v.alt_audio_data else None,
                 "hasAudio": bool(v.audio_data),
                 "hasAltAudio": bool(v.alt_audio_data),
+                "metadata_json": v.metadata_json,
             })
         result.sort(key=lambda x: x["id"])
         return result
@@ -804,6 +948,218 @@ async def delete_voice_from_library(voice_id: str, request: FastAPIRequest):
         db.delete(voice)
         db.commit()
         return {"success": True}
+    finally:
+        db.close()
+
+
+@app.patch("/voice-library-db/{voice_id}")
+async def patch_voice_in_library(voice_id: str, request: FastAPIRequest):
+    """Update selected fields on a voice library entry."""
+    user_id, user_role = _get_user_info(request)
+    if user_role != "administrator":
+        raise HTTPException(status_code=403, detail="Only administrators can update voice library entries")
+    body = await request.json()
+    db = get_db_session()
+    try:
+        voice = db.query(VoiceLibraryEntry).filter(VoiceLibraryEntry.id == voice_id).first()
+        if not voice:
+            raise HTTPException(status_code=404, detail="Voice not found")
+        for field in ("name", "gender", "language", "location", "transcript", "metadata_json"):
+            if field in body:
+                setattr(voice, field, body[field])
+        db.commit()
+        return {
+            "id": voice.id,
+            "name": voice.name,
+            "gender": voice.gender,
+            "language": voice.language,
+            "location": voice.location,
+            "transcript": voice.transcript,
+            "metadata_json": voice.metadata_json,
+        }
+    finally:
+        db.close()
+
+
+# Module-level prompt cache
+_voice_analysis_prompts: dict = {}
+
+def _load_voice_analysis_prompts() -> tuple[str, str]:
+    global _voice_analysis_prompts
+    if _voice_analysis_prompts:
+        return _voice_analysis_prompts["system"], _voice_analysis_prompts["user"]
+    assets_dir = Path(__file__).parent.parent / "attached_assets"
+    system_path = assets_dir / "voice-metadata-system-prompt.md"
+    user_path = assets_dir / "voice-metadata-user-prompt.md"
+    system_prompt = system_path.read_text(encoding="utf-8").strip()
+    user_prompt = user_path.read_text(encoding="utf-8").strip()
+    _voice_analysis_prompts["system"] = system_prompt
+    _voice_analysis_prompts["user"] = user_prompt
+    return system_prompt, user_prompt
+
+
+@app.post("/voice-library-db/analyze")
+async def analyze_voices(request: FastAPIRequest):
+    """Run AI voice metadata analysis on selected voice library entries."""
+    import httpx
+    import base64
+    import json as _json
+
+    user_id, user_role = _get_user_info(request)
+    if user_role != "administrator":
+        raise HTTPException(status_code=403, detail="Only administrators can analyze voice library entries")
+
+    body = await request.json()
+    voice_ids: list[str] = body.get("voice_ids", [])
+    if not voice_ids:
+        raise HTTPException(status_code=400, detail="voice_ids is required")
+
+    openrouter_base_url = os.environ.get("AI_INTEGRATIONS_OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+    openrouter_api_key = os.environ.get("AI_INTEGRATIONS_OPENROUTER_API_KEY", "")
+    model = os.environ.get("VOICE_ANALYSIS_MODEL", "google/gemini-2.5-flash")
+
+    if not openrouter_api_key:
+        raise HTTPException(status_code=500, detail="OpenRouter API key not configured")
+
+    system_prompt, user_prompt = _load_voice_analysis_prompts()
+
+    gender_map = {"male": "M", "female": "F", "androgynous": "U"}
+
+    results = []
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        for voice_id in voice_ids:
+            db = get_db_session()
+            try:
+                voice = db.query(VoiceLibraryEntry).filter(VoiceLibraryEntry.id == voice_id).first()
+                if not voice or not voice.audio_data:
+                    results.append({"voice_id": voice_id, "success": False, "error": "Voice not found or has no audio", "name": None})
+                    continue
+
+                audio_b64 = base64.b64encode(voice.audio_data).decode("utf-8")
+
+                messages = [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": [
+                        {"type": "text", "text": user_prompt},
+                        {"type": "image_url", "image_url": {
+                            "url": f"data:audio/wav;base64,{audio_b64}"
+                        }}
+                    ]}
+                ]
+
+                try:
+                    resp = await client.post(
+                        f"{openrouter_base_url}/chat/completions",
+                        headers={
+                            "Authorization": f"Bearer {openrouter_api_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json={"model": model, "messages": messages},
+                    )
+                    resp.raise_for_status()
+                    content = resp.json()["choices"][0]["message"]["content"]
+
+                    # Strip markdown fences if present
+                    content = content.strip()
+                    if content.startswith("```"):
+                        content = content.split("\n", 1)[-1]
+                        if content.endswith("```"):
+                            content = content[:-3].strip()
+
+                    analysis = _json.loads(content)
+
+                    # Map fields
+                    suggested = analysis.get("suggested_display_name")
+                    new_name = f"{suggested} - {voice.name}" if suggested else voice.name
+                    raw_gender = (analysis.get("gender") or "").lower()
+                    new_gender = gender_map.get(raw_gender, voice.gender)
+                    accent = analysis.get("accent") or {}
+                    new_language = accent.get("primary") or voice.language
+                    new_location = accent.get("region_family") or voice.location
+                    new_transcript = analysis.get("summary") or voice.transcript
+                    new_metadata_json = _json.dumps(analysis)
+
+                    # Persist
+                    voice.name = new_name
+                    voice.gender = new_gender
+                    voice.language = new_language
+                    voice.location = new_location
+                    voice.transcript = new_transcript
+                    voice.metadata_json = new_metadata_json
+                    db.commit()
+
+                    results.append({"voice_id": voice_id, "success": True, "error": None, "name": new_name})
+
+                except Exception as e:
+                    logger.error(f"Voice analysis failed for {voice_id}: {e}")
+                    results.append({"voice_id": voice_id, "success": False, "error": str(e), "name": None})
+            finally:
+                db.close()
+
+    return {"results": results}
+
+
+def _favorites_key(user_id: str) -> str:
+    return f"voice_favorites:{user_id}"
+
+
+@app.get("/voice-favorites")
+async def get_voice_favorites(request: FastAPIRequest):
+    """Get the current user's favorited voice IDs."""
+    user_id, _ = _get_user_info(request)
+    if not user_id:
+        return {"voice_ids": []}
+    db = get_db_session()
+    try:
+        setting = db.query(AppSetting).filter(AppSetting.key == _favorites_key(user_id)).first()
+        if setting and setting.value:
+            return {"voice_ids": json.loads(setting.value)}
+        return {"voice_ids": []}
+    finally:
+        db.close()
+
+
+@app.post("/voice-favorites/{voice_id}")
+async def add_voice_favorite(voice_id: str, request: FastAPIRequest):
+    """Add a voice to the current user's favorites."""
+    user_id, _ = _get_user_info(request)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    db = get_db_session()
+    try:
+        key = _favorites_key(user_id)
+        setting = db.query(AppSetting).filter(AppSetting.key == key).first()
+        favorites = json.loads(setting.value) if setting and setting.value else []
+        if voice_id not in favorites:
+            favorites.append(voice_id)
+        if setting:
+            setting.value = json.dumps(favorites)
+        else:
+            db.add(AppSetting(key=key, value=json.dumps(favorites)))
+        db.commit()
+        return {"voice_ids": favorites}
+    finally:
+        db.close()
+
+
+@app.delete("/voice-favorites/{voice_id}")
+async def remove_voice_favorite(voice_id: str, request: FastAPIRequest):
+    """Remove a voice from the current user's favorites."""
+    user_id, _ = _get_user_info(request)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    db = get_db_session()
+    try:
+        key = _favorites_key(user_id)
+        setting = db.query(AppSetting).filter(AppSetting.key == key).first()
+        favorites = json.loads(setting.value) if setting and setting.value else []
+        favorites = [v for v in favorites if v != voice_id]
+        if setting:
+            setting.value = json.dumps(favorites)
+        else:
+            db.add(AppSetting(key=key, value=json.dumps(favorites)))
+        db.commit()
+        return {"voice_ids": favorites}
     finally:
         db.close()
 

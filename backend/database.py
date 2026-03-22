@@ -209,6 +209,7 @@ class VoiceLibraryEntry(Base):
     audio_data = Column(LargeBinary, nullable=False)
     alt_audio_data = Column(LargeBinary, nullable=True)
     is_shared = Column(Boolean, nullable=False, default=True)
+    metadata_json = Column(Text, nullable=True)
     user_id = Column(String, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
@@ -222,6 +223,10 @@ class CustomVoice(Base):
     audio_data = Column(LargeBinary, nullable=False)
     file_ext = Column(String, nullable=False, default=".wav")
     duration = Column(Float, nullable=False, default=0.0)
+    gender = Column(String, nullable=True)
+    language = Column(String, nullable=True)
+    transcript = Column(Text, nullable=True)
+    metadata_json = Column(Text, nullable=True)
     user_id = Column(String, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
@@ -391,6 +396,11 @@ def _migrate_columns(db_engine):
         ("project_audio_files", "file_path", "ALTER TABLE project_audio_files ADD COLUMN file_path VARCHAR"),
         ("tts_engine_endpoints", "engine_params_json", "ALTER TABLE tts_engine_endpoints ADD COLUMN engine_params_json TEXT"),
         ("projects", "engine_options_json", "ALTER TABLE projects ADD COLUMN engine_options_json TEXT"),
+        ("voice_library", "metadata_json", "ALTER TABLE voice_library ADD COLUMN metadata_json TEXT"),
+        ("custom_voices", "gender", "ALTER TABLE custom_voices ADD COLUMN gender VARCHAR"),
+        ("custom_voices", "language", "ALTER TABLE custom_voices ADD COLUMN language VARCHAR"),
+        ("custom_voices", "transcript", "ALTER TABLE custom_voices ADD COLUMN transcript TEXT"),
+        ("custom_voices", "metadata_json", "ALTER TABLE custom_voices ADD COLUMN metadata_json TEXT"),
     ]
     
     with db_engine.connect() as conn:

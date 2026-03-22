@@ -22,6 +22,8 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { ProjectAudioList } from "@/components/ProjectAudioList";
 import { SpeakerInspectorDialog } from "@/components/SpeakerInspectorDialog";
 import { TTS_ENGINES } from "@/lib/tts-engines";
+import { voiceLabel } from "@/lib/voice-label";
+import { VoiceSelectOptions } from "@/components/VoiceSelectOptions";
 import { LLM_MODELS, DEFAULT_MODEL } from "@/lib/models";
 import type { TreeSelection } from "@/components/ProjectTree";
 import type {
@@ -66,6 +68,11 @@ export function ProjectDetailPanel({ selection, project, onRefresh, settingsPane
     queryKey: ["/api/voice-library-db"],
   });
 
+  const { data: favoritesData } = useQuery<{ voice_ids: string[] }>({
+    queryKey: ["/api/voice-favorites"],
+  });
+  const favoriteIds = new Set(favoritesData?.voice_ids ?? []);
+
   const { data: registeredEngines = [] } = useQuery<any[]>({
     queryKey: ["/api/tts-engines"],
   });
@@ -81,7 +88,7 @@ export function ProjectDetailPanel({ selection, project, onRefresh, settingsPane
 
   const allVoices = [
     ...voiceSamples.map((v) => ({ id: v.id, label: v.name })),
-    ...libraryVoices.map((v) => ({ id: `library:${v.id}`, label: v.name })),
+    ...libraryVoices.map((v) => ({ id: `library:${v.id}`, label: voiceLabel(v) })),
   ];
 
   const audioFiles = useMemo(() => {
@@ -184,6 +191,7 @@ export function ProjectDetailPanel({ selection, project, onRefresh, settingsPane
           project={project}
           allEngines={allEngines}
           allVoices={allVoices}
+          favoriteIds={favoriteIds}
           registeredEngines={registeredEngines}
           onRefresh={onRefresh}
           view={selection.type as "project" | "engine-settings" | "voice-settings" | "characters" | "output-files"}
@@ -200,6 +208,7 @@ export function ProjectDetailPanel({ selection, project, onRefresh, settingsPane
           project={project}
           allEngines={allEngines}
           allVoices={allVoices}
+          favoriteIds={favoriteIds}
           onRefresh={onRefresh}
         />
       )}
@@ -339,6 +348,7 @@ interface ProjectSettingsPanelProps {
   project: ProjectData;
   allEngines: { id: string; label: string }[];
   allVoices: { id: string; label: string }[];
+  favoriteIds: Set<string>;
   registeredEngines: any[];
   onRefresh: () => void;
   view: SettingsView;
@@ -348,7 +358,7 @@ const ProjectSettingsPanel = forwardRef<
   { save: () => void; isDirty: () => boolean },
   ProjectSettingsPanelProps
 >(function ProjectSettingsPanel(
-  { project, allEngines, allVoices, registeredEngines, onRefresh, view },
+  { project, allEngines, allVoices, favoriteIds, registeredEngines, onRefresh, view },
   ref
 ) {
   const { toast } = useToast();
@@ -1058,9 +1068,7 @@ const ProjectSettingsPanel = forwardRef<
                 <SelectValue placeholder="Select a voice..." />
               </SelectTrigger>
               <SelectContent>
-                {allVoices.map((v) => (
-                  <SelectItem key={v.id} value={v.id}>{v.label}</SelectItem>
-                ))}
+                <VoiceSelectOptions opts={allVoices.map(v => ({ value: v.id, label: v.label }))} favoriteIds={favoriteIds} />
               </SelectContent>
             </Select>
           </div>
@@ -1196,10 +1204,11 @@ const ProjectSettingsPanel = forwardRef<
                           <SelectValue placeholder="Use narrator default" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="__narrator__">Use narrator default</SelectItem>
-                          {allVoices.map((v) => (
-                            <SelectItem key={v.id} value={v.id}>{v.label}</SelectItem>
-                          ))}
+                          <VoiceSelectOptions
+                            opts={allVoices.map(v => ({ value: v.id, label: v.label }))}
+                            favoriteIds={favoriteIds}
+                            prepend={<SelectItem value="__narrator__">Use narrator default</SelectItem>}
+                          />
                         </SelectContent>
                       </Select>
                     </div>
@@ -1283,12 +1292,14 @@ function ChapterDetailPanel({
   project,
   allEngines,
   allVoices,
+  favoriteIds,
   onRefresh,
 }: {
   chapter: ProjectChapter;
   project: ProjectData;
   allEngines: { id: string; label: string }[];
   allVoices: { id: string; label: string }[];
+  favoriteIds: Set<string>;
   onRefresh: () => void;
 }) {
   const { toast } = useToast();
@@ -1376,10 +1387,11 @@ function ChapterDetailPanel({
               <SelectValue placeholder="Use book default" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="__default__">Use book default</SelectItem>
-              {allVoices.map((v) => (
-                <SelectItem key={v.id} value={v.id}>{v.label}</SelectItem>
-              ))}
+              <VoiceSelectOptions
+                opts={allVoices.map(v => ({ value: v.id, label: v.label }))}
+                favoriteIds={favoriteIds}
+                prepend={<SelectItem value="__default__">Use book default</SelectItem>}
+              />
             </SelectContent>
           </Select>
         </div>

@@ -64,6 +64,7 @@ export const libraryVoiceSchema = z.object({
   duration: z.number(),
   hasAudio: z.boolean().optional(),
   hasAltAudio: z.boolean().optional(),
+  metadata_json: z.string().nullable().optional(),
 });
 
 export type LibraryVoice = z.infer<typeof libraryVoiceSchema>;

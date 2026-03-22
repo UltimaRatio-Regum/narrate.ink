@@ -12,6 +12,8 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { TTS_ENGINES, isVoiceCloningEngine } from "@/lib/tts-engines";
 import { LLM_MODELS, DEFAULT_MODEL } from "@/lib/models";
+import { voiceLabel } from "@/lib/voice-label";
+import { VoiceSelectOptions } from "@/components/VoiceSelectOptions";
 import type { RegisteredEngine } from "@/components/SettingsPanel";
 import type { TTSEngine, EdgeVoice, LibraryVoice, ProjectData } from "@shared/schema";
 
@@ -61,6 +63,11 @@ export function ProjectWizardTab({ onProjectCreated }: ProjectWizardTabProps) {
     queryKey: ["/api/voice-library-db"],
     enabled: isVoiceCloningEngine(ttsEngine),
   });
+
+  const { data: favoritesData } = useQuery<{ voice_ids: string[] }>({
+    queryKey: ["/api/voice-favorites"],
+  });
+  const favoriteIds = new Set(favoritesData?.voice_ids ?? []);
 
   const { data: registeredEngines = [] } = useQuery<RegisteredEngine[]>({
     queryKey: ["/api/tts-engines"],
@@ -250,7 +257,7 @@ export function ProjectWizardTab({ onProjectCreated }: ProjectWizardTabProps) {
     if (isVoiceCloningEngine(ttsEngine) && libraryVoices) {
       return libraryVoices.map(v => ({
         value: `library:${v.id}`,
-        label: v.name,
+        label: voiceLabel(v),
       }));
     }
     const registeredEngine = registeredEngines.find(e => e.engine_id === ttsEngine);
@@ -557,11 +564,7 @@ export function ProjectWizardTab({ onProjectCreated }: ProjectWizardTabProps) {
                     <SelectValue placeholder="Select a voice" />
                   </SelectTrigger>
                   <SelectContent>
-                    {voiceOptions.slice(0, 50).map((opt) => (
-                      <SelectItem key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </SelectItem>
-                    ))}
+                    <VoiceSelectOptions opts={voiceOptions} favoriteIds={favoriteIds} />
                   </SelectContent>
                 </Select>
               </div>
@@ -579,11 +582,7 @@ export function ProjectWizardTab({ onProjectCreated }: ProjectWizardTabProps) {
                       <SelectValue placeholder="Select narrator voice" />
                     </SelectTrigger>
                     <SelectContent>
-                      {voiceOptions.slice(0, 50).map((opt) => (
-                        <SelectItem key={opt.value} value={opt.value}>
-                          {opt.label}
-                        </SelectItem>
-                      ))}
+                      <VoiceSelectOptions opts={voiceOptions} favoriteIds={favoriteIds} />
                     </SelectContent>
                   </Select>
                 </div>
@@ -601,11 +600,7 @@ export function ProjectWizardTab({ onProjectCreated }: ProjectWizardTabProps) {
                         <SelectValue placeholder={`Select voice for ${speaker}`} />
                       </SelectTrigger>
                       <SelectContent>
-                        {voiceOptions.slice(0, 50).map((opt) => (
-                          <SelectItem key={opt.value} value={opt.value}>
-                            {opt.label}
-                          </SelectItem>
-                        ))}
+                        <VoiceSelectOptions opts={voiceOptions} favoriteIds={favoriteIds} />
                       </SelectContent>
                     </Select>
                   </div>
