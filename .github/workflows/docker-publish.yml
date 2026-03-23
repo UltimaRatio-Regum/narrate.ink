@@ -12,7 +12,9 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}   # → ghcr.io/ultimaratio-regum/voxlibris
+  # github.repository preserves original casing (UltimaRatio-Regum/voxlibris).
+  # OCI registry refs must be lowercase, so we compute IMAGE_NAME_LC in step 2
+  # and use that everywhere a registry reference appears.
 
 jobs:
   build-and-push:
@@ -50,6 +52,10 @@ jobs:
             echo "IS_PRERELEASE=false" >> "$GITHUB_ENV"
           fi
 
+          # OCI registry refs must be lowercase — github.repository preserves
+          # the original casing, so we normalise it here once for all later steps.
+          echo "IMAGE_NAME_LC=${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
       # ── 3. Set up QEMU (needed for arm64 cross-compilation) ────────────────
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -75,7 +81,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}
           tags: |
             # Always tag with the exact git tag
             type=ref,event=tag
@@ -104,8 +110,8 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
-          cache-to:   type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:buildcache
+          cache-to:   type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:buildcache,mode=max
 
       # ── 8. Attest the image (supply-chain provenance) ─────────────────────
       # Generates a signed SLSA provenance attestation attached to the package.
@@ -113,7 +119,7 @@ jobs:
       - name: Generate artifact attestation
         uses: actions/attest-build-provenance@v1
         with:
-          subject-name:   ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          subject-name:   ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
 
@@ -128,5 +134,5 @@ jobs:
           echo "| **Pre-release** | \`${{ env.IS_PRERELEASE }}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| **Digest** | \`${{ steps.push.outputs.digest }}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| **Platforms** | \`linux/amd64\`, \`linux/arm64\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| **Registry** | \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Registry** | \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}\` |" >> "$GITHUB_STEP_SUMMARY"
 
