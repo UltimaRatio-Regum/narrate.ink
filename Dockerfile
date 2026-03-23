@@ -42,6 +42,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     rubberband-cli \
     librubberband-dev \
     libpq5 \
+    libportaudio2 \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
@@ -59,6 +60,7 @@ COPY backend/ backend/
 COPY shared/ shared/
 COPY docs/ docs/
 COPY voice_samples/ voice_samples/
+COPY attached_assets/ attached_assets/
 
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 RUN chmod +x /app/docker-entrypoint.sh
