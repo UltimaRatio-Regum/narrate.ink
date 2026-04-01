@@ -43,6 +43,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     librubberband-dev \
     libpq5 \
     libportaudio2 \
+    # DNS debugging tools (dig, nslookup, host)
+    dnsutils \
+    # Lightweight vi/vim for in-container editing
+    vim-tiny \
+    # General shell utilities (ps, top, netstat, etc.)
+    procps \
+    net-tools \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
