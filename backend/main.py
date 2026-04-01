@@ -6,6 +6,10 @@ Text to Audiobook Generator with Chatterbox TTS
 from dotenv import load_dotenv
 load_dotenv()  # loads .env if present; never overrides vars already set in the environment
 
+# ── Logging must be configured before any other import that uses stdlib logging ──
+from narrate_ink_logger import setup_logging, tracecall
+setup_logging()
+
 import os
 import re
 import json
@@ -44,12 +48,12 @@ from database import (
 from remote_tts_client import RemoteTTSClient
 from project_segmenter import segment_project_background, split_into_sections, _call_llm_for_section, rechunk_section, get_chapter_chars_in_progress, apply_merge_short_chunks
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from loguru import logger
 
 TARGET_CHUNK_WORDS = 30
 MAX_CHUNK_WORDS = 40
 
+@tracecall
 def rechunk_segment(text: str) -> list[str]:
     """Re-chunk a segment that exceeds the target word count using smart splitting."""
     words = text.split()
@@ -82,6 +86,7 @@ def rechunk_segment(text: str) -> list[str]:
     
     return chunks if chunks else [text]
 
+@tracecall
 def _words_to_char_pos(text: str, word_count: int) -> int:
     words = text.split()
     if word_count >= len(words):
@@ -95,6 +100,7 @@ def _words_to_char_pos(text: str, word_count: int) -> int:
     avg_chars = len(text) / max(1, len(words))
     return int(word_count * avg_chars)
 
+@tracecall
 def _find_best_split(text: str, target_pos: int) -> int:
     search_start = max(0, target_pos - 100)
     search_end = min(len(text), target_pos + 50)
@@ -118,10 +124,13 @@ def _find_best_split(text: str, target_pos: int) -> int:
     
     return target_pos
 
-app = FastAPI(title="Narrator AI API", version="1.0.0")
+logger.trace("Creating FastAPI application")
+app = FastAPI(title="narrate.ink API", version="1.0.0")
+logger.trace("FastAPI application created")
 
 import os as _os
 _cors_origins = [o.strip() for o in _os.environ.get("CORS_ALLOWED_ORIGINS", "http://localhost:5000,http://127.0.0.1:5000").split(",") if o.strip()]
+logger.trace("Registering CORS middleware — allowed_origins={}", _cors_origins)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
@@ -137,14 +146,21 @@ VOICES_DIR.mkdir(exist_ok=True)
 OUTPUT_DIR = UPLOAD_DIR / "output"
 OUTPUT_DIR.mkdir(exist_ok=True)
 VOICE_LIBRARY_DIR = Path(__file__).parent.parent / "voice_samples"
+logger.trace("Directory layout: upload_dir={} voices_dir={} output_dir={}", UPLOAD_DIR.resolve(), VOICES_DIR.resolve(), OUTPUT_DIR.resolve())
 
+logger.trace("Mounting /uploads static directory")
 app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
 if VOICE_LIBRARY_DIR.exists():
+    logger.trace("Mounting /voice_library static directory — {}", VOICE_LIBRARY_DIR.resolve())
     app.mount("/voice_library", StaticFiles(directory=str(VOICE_LIBRARY_DIR)), name="voice_library")
 
+logger.trace("Instantiating TextParser")
 text_parser = TextParser()
+logger.trace("Instantiating AudioProcessor")
 audio_processor = AudioProcessor()
+logger.trace("Instantiating TTSService")
 tts_service = TTSService()
+logger.trace("Core services ready")
 
 voice_samples: dict[str, VoiceSample] = {}
 
@@ -156,6 +172,7 @@ _stt_models_cache: list[dict] | None = None
 _stt_models_error: str | None = None
 
 
+@tracecall
 def _fetch_stt_models_background():
     """Fetch OpenRouter models that accept audio input; runs once at startup in a daemon thread."""
     import httpx as _httpx
@@ -204,6 +221,7 @@ def _fetch_stt_models_background():
 
 
 @app.on_event("startup")
+@tracecall
 async def _startup():
     import threading
     t = threading.Thread(target=_fetch_stt_models_background, daemon=True)
@@ -211,6 +229,7 @@ async def _startup():
 
 
 @app.get("/validation/stt-models")
+@tracecall
 async def get_stt_models():
     """Return the list of OpenRouter models that accept audio input."""
     if _stt_models_cache is not None:
@@ -218,6 +237,7 @@ async def get_stt_models():
     return {"models": [], "ready": False, "error": _stt_models_error}
 
 
+@tracecall
 def _get_user_info(request: FastAPIRequest) -> tuple[Optional[str], str]:
     """Extract user_id and user_role from proxy-forwarded headers."""
     user_id = request.headers.get("X-User-Id")
@@ -225,6 +245,7 @@ def _get_user_info(request: FastAPIRequest) -> tuple[Optional[str], str]:
     return user_id, user_role
 
 
+@tracecall
 def _require_project_access(db, user_id: Optional[str], user_role: str, project_id: str):
     """Verify the user has access to the given project. Raises 404 if not found or unauthorized."""
     project = db.query(Project).filter(Project.id == project_id).first()
@@ -235,6 +256,7 @@ def _require_project_access(db, user_id: Optional[str], user_role: str, project_
     return project
 
 
+@tracecall
 def _require_voice_access(db, user_id: Optional[str], user_role: str, voice_id: str):
     """Verify the user has access to the given custom voice."""
     voice = db.query(CustomVoice).filter(CustomVoice.id == voice_id).first()
@@ -245,6 +267,7 @@ def _require_voice_access(db, user_id: Optional[str], user_role: str, voice_id: 
     return voice
 
 
+@tracecall
 def _require_engine_access(db, user_id: Optional[str], user_role: str, engine_id: str, write: bool = False):
     """Verify the user has access to the given engine. For write ops on shared engines, require admin."""
     engine = db.query(TTSEngineEndpoint).filter(TTSEngineEndpoint.engine_id == engine_id).first()
@@ -261,6 +284,7 @@ def _require_engine_access(db, user_id: Optional[str], user_role: str, engine_id
     return engine
 
 
+@tracecall
 def _require_job_access(db, user_id: Optional[str], user_role: str, job_id: str):
     """Verify the user has access to the given job."""
     from database import TTSJob
@@ -272,6 +296,7 @@ def _require_job_access(db, user_id: Optional[str], user_role: str, job_id: str)
     return job
 
 
+@tracecall
 def _load_custom_voices_from_db():
     """Load all custom voices from the database into the in-memory dict."""
     try:
@@ -294,18 +319,21 @@ def _load_custom_voices_from_db():
 
 
 @app.get("/health")
+@tracecall
 async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "version": "1.0.0"}
 
 
 @app.get("/voices")
+@tracecall
 async def get_voices():
     """Get all voice samples"""
     return list(voice_samples.values())
 
 
 @app.post("/voices/upload")
+@tracecall
 async def upload_voice(
     request: FastAPIRequest,
     name: str = Form(...),
@@ -366,6 +394,7 @@ async def upload_voice(
 
 
 @app.get("/custom-voices/{voice_id}/audio")
+@tracecall
 async def get_custom_voice_audio(voice_id: str, request: FastAPIRequest):
     """Stream custom voice audio from database"""
     user_id, user_role = _get_user_info(request)
@@ -379,6 +408,7 @@ async def get_custom_voice_audio(voice_id: str, request: FastAPIRequest):
 
 
 @app.get("/custom-voices")
+@tracecall
 async def list_custom_voices(request: FastAPIRequest):
     """List all custom voices from the database"""
     user_id, user_role = _get_user_info(request)
@@ -407,6 +437,7 @@ async def list_custom_voices(request: FastAPIRequest):
 
 
 @app.put("/custom-voices/{voice_id}")
+@tracecall
 async def rename_custom_voice(voice_id: str, request: FastAPIRequest, name: str = Form(...)):
     """Rename a custom voice"""
     user_id, user_role = _get_user_info(request)
@@ -423,6 +454,7 @@ async def rename_custom_voice(voice_id: str, request: FastAPIRequest, name: str 
 
 
 @app.delete("/voices/{voice_id}")
+@tracecall
 async def delete_voice(voice_id: str, request: FastAPIRequest):
     """Delete a voice sample from database"""
     user_id, user_role = _get_user_info(request)
@@ -438,6 +470,7 @@ async def delete_voice(voice_id: str, request: FastAPIRequest):
 
 
 @app.patch("/custom-voices/{voice_id}")
+@tracecall
 async def patch_custom_voice(voice_id: str, request: FastAPIRequest):
     """Update metadata fields on a custom voice."""
     user_id, user_role = _get_user_info(request)
@@ -473,6 +506,7 @@ _CUSTOM_VOICE_MIME_TYPES = {
 
 
 @app.post("/custom-voices/analyze")
+@tracecall
 async def analyze_custom_voices(request: FastAPIRequest):
     """Run AI voice metadata analysis on selected custom voice entries."""
     import httpx
@@ -570,6 +604,7 @@ async def analyze_custom_voices(request: FastAPIRequest):
     return {"results": results}
 
 
+@tracecall
 def format_location(location: str, language: str) -> str:
     """Format location for display, e.g., 'Southern_England' -> 'Southern England'
     Only add country suffix if appropriate based on language/region context."""
@@ -615,6 +650,7 @@ def format_location(location: str, language: str) -> str:
 
 
 @app.get("/voice-library")
+@tracecall
 async def get_voice_library():
     """Get all voices from the voice library"""
     if not VOICE_LIBRARY_DIR.exists():
@@ -684,6 +720,7 @@ async def get_voice_library():
 
 
 @app.get("/tts-engines")
+@tracecall
 async def list_tts_engines(request: FastAPIRequest):
     """List all registered TTS engine endpoints from the database."""
     user_id, user_role = _get_user_info(request)
@@ -732,6 +769,7 @@ class AddEngineRequestV2(BaseModel):
 
 
 @app.post("/tts-engines")
+@tracecall
 async def add_tts_engine(req: FastAPIRequest, request_body: AddEngineRequestV2 = None):
     """Register a new TTS engine by URL. Queries GetEngineDetails and stores in DB."""
     user_id, user_role = _get_user_info(req)
@@ -827,6 +865,7 @@ async def add_tts_engine(req: FastAPIRequest, request_body: AddEngineRequestV2 =
 
 
 @app.post("/tts-engines/{engine_id}/test")
+@tracecall
 async def test_tts_engine(engine_id: str, request: FastAPIRequest):
     """Test connectivity to a registered TTS engine."""
     user_id, user_role = _get_user_info(request)
@@ -864,6 +903,7 @@ async def test_tts_engine(engine_id: str, request: FastAPIRequest):
 
 
 @app.delete("/tts-engines/{engine_id}")
+@tracecall
 async def remove_tts_engine(engine_id: str, request: FastAPIRequest):
     """Remove a registered TTS engine."""
     user_id, user_role = _get_user_info(request)
@@ -878,6 +918,7 @@ async def remove_tts_engine(engine_id: str, request: FastAPIRequest):
 
 
 @app.get("/voice-library-db")
+@tracecall
 async def get_voice_library_db(request: FastAPIRequest):
     """Get all voices from the PostgreSQL voice library."""
     user_id, user_role = _get_user_info(request)
@@ -915,6 +956,7 @@ async def get_voice_library_db(request: FastAPIRequest):
 
 
 @app.get("/voice-library-db/{voice_id}/audio")
+@tracecall
 async def get_voice_audio(voice_id: str, request: FastAPIRequest):
     """Stream voice sample audio from the database."""
     user_id, user_role = _get_user_info(request)
@@ -931,6 +973,7 @@ async def get_voice_audio(voice_id: str, request: FastAPIRequest):
 
 
 @app.get("/voice-library-db/{voice_id}/alt-audio")
+@tracecall
 async def get_voice_alt_audio(voice_id: str, request: FastAPIRequest):
     """Stream alternate voice sample audio from the database."""
     user_id, user_role = _get_user_info(request)
@@ -947,6 +990,7 @@ async def get_voice_alt_audio(voice_id: str, request: FastAPIRequest):
 
 
 @app.post("/voice-library-db")
+@tracecall
 async def upload_voice_to_library(
     request: FastAPIRequest,
     name: str = Form(...),
@@ -1005,6 +1049,7 @@ async def upload_voice_to_library(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@tracecall
 def _unique_voice_name(base_name: str, reserved: set) -> str:
     """Return base_name, or base_name (1), (2), ... if it conflicts with reserved."""
     if base_name not in reserved:
@@ -1018,6 +1063,7 @@ def _unique_voice_name(base_name: str, reserved: set) -> str:
 
 
 @app.post("/voice-library-db/batch-upload")
+@tracecall
 async def batch_upload_voices(
     request: FastAPIRequest,
     files: list[UploadFile] = File(...),
@@ -1250,6 +1296,7 @@ async def batch_upload_voices(
 
 
 @app.delete("/voice-library-db/{voice_id}")
+@tracecall
 async def delete_voice_from_library(voice_id: str, request: FastAPIRequest):
     """Delete a voice from the PostgreSQL voice library."""
     user_id, user_role = _get_user_info(request)
@@ -1268,6 +1315,7 @@ async def delete_voice_from_library(voice_id: str, request: FastAPIRequest):
 
 
 @app.patch("/voice-library-db/{voice_id}")
+@tracecall
 async def patch_voice_in_library(voice_id: str, request: FastAPIRequest):
     """Update selected fields on a voice library entry."""
     user_id, user_role = _get_user_info(request)
@@ -1299,6 +1347,7 @@ async def patch_voice_in_library(voice_id: str, request: FastAPIRequest):
 # Module-level prompt cache
 _voice_analysis_prompts: dict = {}
 
+@tracecall
 def _load_voice_analysis_prompts() -> tuple[str, str]:
     global _voice_analysis_prompts
     if _voice_analysis_prompts:
@@ -1314,6 +1363,7 @@ def _load_voice_analysis_prompts() -> tuple[str, str]:
 
 
 @app.post("/voice-library-db/analyze")
+@tracecall
 async def analyze_voices(request: FastAPIRequest):
     """Run AI voice metadata analysis on selected voice library entries."""
     import httpx
@@ -1414,11 +1464,13 @@ async def analyze_voices(request: FastAPIRequest):
     return {"results": results}
 
 
+@tracecall
 def _favorites_key(user_id: str) -> str:
     return f"voice_favorites:{user_id}"
 
 
 @app.get("/voice-favorites")
+@tracecall
 async def get_voice_favorites(request: FastAPIRequest):
     """Get the current user's favorited voice IDs."""
     user_id, _ = _get_user_info(request)
@@ -1435,6 +1487,7 @@ async def get_voice_favorites(request: FastAPIRequest):
 
 
 @app.post("/voice-favorites/{voice_id}")
+@tracecall
 async def add_voice_favorite(voice_id: str, request: FastAPIRequest):
     """Add a voice to the current user's favorites."""
     user_id, _ = _get_user_info(request)
@@ -1458,6 +1511,7 @@ async def add_voice_favorite(voice_id: str, request: FastAPIRequest):
 
 
 @app.delete("/voice-favorites/{voice_id}")
+@tracecall
 async def remove_voice_favorite(voice_id: str, request: FastAPIRequest):
     """Remove a voice from the current user's favorites."""
     user_id, _ = _get_user_info(request)
@@ -1490,6 +1544,7 @@ from validation_runner import (
 _VALIDATION_ALGORITHMS = list(ALGORITHM_LABELS.keys())
 
 
+@tracecall
 def _default_validation_config() -> dict:
     return {
         "stt_model": "google/gemini-2.5-flash",
@@ -1502,6 +1557,7 @@ def _default_validation_config() -> dict:
     }
 
 
+@tracecall
 def _serialize_validation_config(cfg: "ProjectValidationConfig") -> dict:
     return {
         "sttModel": cfg.stt_model,
@@ -1514,6 +1570,7 @@ def _serialize_validation_config(cfg: "ProjectValidationConfig") -> dict:
     }
 
 
+@tracecall
 def _serialize_validation_result(r: "ChunkValidationResult") -> dict:
     return {
         "id": r.id,
@@ -1532,6 +1589,7 @@ def _serialize_validation_result(r: "ChunkValidationResult") -> dict:
 
 
 @app.get("/projects/{project_id}/validation/config")
+@tracecall
 async def get_validation_config(project_id: str, request: FastAPIRequest):
     """Get validation configuration for a project."""
     user_id, user_role = _get_user_info(request)
@@ -1553,6 +1611,7 @@ async def get_validation_config(project_id: str, request: FastAPIRequest):
 
 
 @app.post("/projects/{project_id}/validation/config")
+@tracecall
 async def save_validation_config(project_id: str, request: FastAPIRequest):
     """Save validation configuration for a project."""
     user_id, user_role = _get_user_info(request)
@@ -1591,6 +1650,7 @@ async def save_validation_config(project_id: str, request: FastAPIRequest):
 
 
 @app.post("/projects/{project_id}/validation/start")
+@tracecall
 async def start_validation_job(project_id: str, request: FastAPIRequest):
     """Start a validation job for a project."""
     user_id, user_role = _get_user_info(request)
@@ -1647,6 +1707,7 @@ async def start_validation_job(project_id: str, request: FastAPIRequest):
 
 
 @app.get("/projects/{project_id}/validation/results")
+@tracecall
 async def get_validation_results(project_id: str, request: FastAPIRequest):
     """Get all validation results for a project."""
     user_id, user_role = _get_user_info(request)
@@ -1703,6 +1764,7 @@ async def get_validation_results(project_id: str, request: FastAPIRequest):
 
 
 @app.post("/projects/{project_id}/validation/apply")
+@tracecall
 async def apply_validation_settings(project_id: str, request: FastAPIRequest):
     """Re-apply flagging using new config against stored scores (no re-running STT)."""
     user_id, user_role = _get_user_info(request)
@@ -1755,6 +1817,7 @@ async def apply_validation_settings(project_id: str, request: FastAPIRequest):
 
 
 @app.post("/projects/{project_id}/validation/regenerate")
+@tracecall
 async def regenerate_flagged_chunks(project_id: str, request: FastAPIRequest):
     """Submit all flagged, non-regenerated chunks for TTS re-generation."""
     user_id, user_role = _get_user_info(request)
@@ -1857,6 +1920,7 @@ async def regenerate_flagged_chunks(project_id: str, request: FastAPIRequest):
 
 
 @app.patch("/projects/{project_id}/validation/chunks/{chunk_id}")
+@tracecall
 async def patch_validation_chunk(project_id: str, chunk_id: str, request: FastAPIRequest):
     """Mark a validation result as good (unflagged) or as regenerated."""
     user_id, user_role = _get_user_info(request)
@@ -1911,6 +1975,7 @@ async def patch_validation_chunk(project_id: str, chunk_id: str, request: FastAP
 
 
 @app.get("/projects/{project_id}/chunks/{chunk_id}/audio")
+@tracecall
 async def get_chunk_audio(project_id: str, chunk_id: str, request: FastAPIRequest):
     """Return the latest generated audio for a specific chunk (streams the raw bytes)."""
     user_id, user_role = _get_user_info(request)
@@ -1948,6 +2013,7 @@ async def get_chunk_audio(project_id: str, chunk_id: str, request: FastAPIReques
 
 
 @app.get("/edge-voices")
+@tracecall
 async def get_edge_voices():
     """Get all available edge-tts voices"""
     try:
@@ -1962,6 +2028,7 @@ async def get_edge_voices():
 
 
 @app.get("/openai-voices")
+@tracecall
 async def get_openai_voices():
     """Get available OpenAI TTS voices"""
     return {
@@ -1978,6 +2045,7 @@ async def get_openai_voices():
 
 
 @app.get("/chatterbox-status")
+@tracecall
 async def get_chatterbox_status():
     """Get Chatterbox TTS configuration status"""
     from chatterbox_config import is_paid_chatterbox_configured, CHATTERBOX_PAID_CONFIG, CHATTERBOX_FREE_CONFIG
@@ -1998,6 +2066,7 @@ async def get_chatterbox_status():
 
 
 @app.post("/parse-text")
+@tracecall
 async def parse_text(request: ParseTextRequest):
     """Parse text into segments with sentiment analysis"""
     try:
@@ -2018,6 +2087,7 @@ class ParseTextLLMRequest(BaseModel):
 
 
 @app.post("/parse-text-llm-stream")
+@tracecall
 async def parse_text_llm_stream(request: ParseTextLLMRequest):
     """Parse text using LLM with streaming progress updates via SSE"""
     from starlette.responses import StreamingResponse
@@ -2028,6 +2098,7 @@ async def parse_text_llm_stream(request: ParseTextLLMRequest):
     OPENROUTER_BASE_URL = os.environ.get("AI_INTEGRATIONS_OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
     OPENROUTER_API_KEY = os.environ.get("AI_INTEGRATIONS_OPENROUTER_API_KEY", "")
     
+    @tracecall
     def split_into_chunks(text: str, max_paragraphs: int = 3) -> list[str]:
         """Split text into chunks of ~2-3 paragraphs, respecting quote boundaries."""
         paragraphs = re.split(r'\n\s*\n', text)
@@ -2070,6 +2141,7 @@ async def parse_text_llm_stream(request: ParseTextLLMRequest):
         
         return chunks
     
+    @tracecall
     def fallback_parse_chunk(chunk: str, known_speakers: list[str] | None = None) -> dict:
         """Use basic text parser as fallback when LLM fails."""
         segments_list, speakers_list = text_parser.parse(chunk, known_speakers=known_speakers)
@@ -2089,6 +2161,7 @@ async def parse_text_llm_stream(request: ParseTextLLMRequest):
         "excited", "calm", "anxious", "hopeful", "melancholy", "tender", "proud",
     ]
 
+    @tracecall
     async def call_llm_for_chunk(client: httpx.AsyncClient, chunk: str, known_speakers: list[str], context: str) -> dict:
         """Call shared LLM parsing function from project_segmenter."""
         try:
@@ -2100,6 +2173,7 @@ async def parse_text_llm_stream(request: ParseTextLLMRequest):
             logger.error(f"LLM call failed: {e}")
             return fallback_parse_chunk(chunk, known_speakers=known_speakers)
     
+    @tracecall
     async def generate_stream():
         chunks = split_into_chunks(request.text)
         total_chunks = len(chunks)
@@ -2173,6 +2247,7 @@ async def parse_text_llm_stream(request: ParseTextLLMRequest):
 
 
 @app.post("/parse-text-llm")
+@tracecall
 async def parse_text_llm(request: ParseTextLLMRequest):
     """Parse text using LLM (non-streaming fallback) — delegates to shared parsing function."""
     import httpx
@@ -2227,6 +2302,7 @@ async def parse_text_llm(request: ParseTextLLMRequest):
         return ParseTextResponse(segments=segments, detectedSpeakers=speakers)
 
 
+@tracecall
 def _resolve_voice_files() -> dict[str, str]:
     """Resolve all voice files: custom voices from DB (written to temp files),
     library voices from filesystem, and DB voice library entries."""
@@ -2264,6 +2340,7 @@ def _resolve_voice_files() -> dict[str, str]:
 
 
 @app.post("/generate")
+@tracecall
 async def generate_audio(request: GenerateRequest):
     """Generate audiobook from parsed segments"""
     try:
@@ -2289,6 +2366,7 @@ async def generate_audio(request: GenerateRequest):
 
 
 @app.post("/generate-stream")
+@tracecall
 async def generate_audio_stream(request: GenerateRequest):
     """Generate audiobook with streaming progress updates via SSE"""
     from starlette.responses import StreamingResponse
@@ -2298,6 +2376,7 @@ async def generate_audio_stream(request: GenerateRequest):
     # Use asyncio.Queue for real-time progress updates
     progress_queue: asyncio.Queue = asyncio.Queue()
     
+    @tracecall
     async def generate_audio_task():
         try:
             output_id = str(uuid.uuid4())
@@ -2338,6 +2417,7 @@ async def generate_audio_stream(request: GenerateRequest):
             logger.error(f"Stream generation error: {e}")
             await progress_queue.put({'type': 'error', 'error': str(e)})
     
+    @tracecall
     async def generate_with_progress():
         total_segments = len(request.segments)
         
@@ -2380,20 +2460,30 @@ from job_manager import (
 )
 from job_runner import start_job_async
 
+logger.trace("Calling init_database()")
 init_database()
+logger.debug("Database initialised")
 
 
 @app.on_event("startup")
+@tracecall
 async def startup_event():
     """Run cleanup loop on startup, load custom voices, seed settings, reset orphaned jobs."""
     import asyncio
+    logger.trace("startup_event: loading custom voices from DB")
     _load_custom_voices_from_db()
+    logger.trace("startup_event: seeding parsing prompt")
     _seed_parsing_prompt()
+    logger.trace("startup_event: seeding default pause duration")
     _seed_default_pause_duration()
+    logger.trace("startup_event: resetting orphaned jobs")
     _reset_orphaned_waiting_jobs()
+    logger.trace("startup_event: launching cleanup loop task")
     asyncio.create_task(run_cleanup_loop())
+    logger.info("narrate.ink backend startup complete")
 
 
+@tracecall
 def _reset_orphaned_waiting_jobs():
     """Reset any jobs stuck in WAITING/PROCESSING and re-queue PENDING jobs from a previous process."""
     from job_runner import start_job_async
@@ -2442,6 +2532,7 @@ class CreateJobRequest(BaseModel):
 
 
 @app.post("/jobs")
+@tracecall
 async def create_tts_job(request: CreateJobRequest, req: FastAPIRequest):
     """Create a new TTS generation job."""
     user_id, user_role = _get_user_info(req)
@@ -2462,6 +2553,7 @@ async def create_tts_job(request: CreateJobRequest, req: FastAPIRequest):
 
 
 @app.get("/jobs")
+@tracecall
 async def list_jobs(request: FastAPIRequest, include_completed: bool = True, limit: int = 20, offset: int = 0, status_filter: str = "all", sort_order: str = "desc"):
     """List all TTS jobs with pagination, optional status filter, and sort order."""
     user_id, user_role = _get_user_info(request)
@@ -2473,6 +2565,7 @@ async def list_jobs(request: FastAPIRequest, include_completed: bool = True, lim
 
 
 @app.get("/jobs/{job_id}")
+@tracecall
 async def get_job_status(job_id: str, request: FastAPIRequest):
     """Get status of a TTS job."""
     user_id, user_role = _get_user_info(request)
@@ -2488,6 +2581,7 @@ async def get_job_status(job_id: str, request: FastAPIRequest):
 
 
 @app.get("/jobs/{job_id}/segments")
+@tracecall
 async def get_job_segments_endpoint(job_id: str, request: FastAPIRequest, completed_only: bool = False):
     """Get segments for a job."""
     user_id, user_role = _get_user_info(request)
@@ -2505,6 +2599,7 @@ async def get_job_segments_endpoint(job_id: str, request: FastAPIRequest, comple
 
 
 @app.get("/jobs/{job_id}/segments/{segment_id}/audio")
+@tracecall
 async def get_segment_audio_endpoint(job_id: str, segment_id: str, request: FastAPIRequest):
     """Get audio for a specific segment."""
     user_id, user_role = _get_user_info(request)
@@ -2527,6 +2622,7 @@ async def get_segment_audio_endpoint(job_id: str, segment_id: str, request: Fast
 
 
 @app.post("/jobs/clear-completed")
+@tracecall
 async def clear_completed_jobs(request: FastAPIRequest):
     """Delete finished jobs (completed, failed, cancelled) for the calling user."""
     user_id, user_role = _get_user_info(request)
@@ -2578,6 +2674,7 @@ async def clear_completed_jobs(request: FastAPIRequest):
 
 
 @app.post("/jobs/{job_id}/cancel")
+@tracecall
 async def cancel_job_endpoint(job_id: str, request: FastAPIRequest):
     """Cancel a running job."""
     user_id, user_role = _get_user_info(request)
@@ -2595,6 +2692,7 @@ async def cancel_job_endpoint(job_id: str, request: FastAPIRequest):
 
 
 @app.post("/jobs/{job_id}/retry")
+@tracecall
 async def retry_job_endpoint(job_id: str, request: FastAPIRequest):
     """Retry a failed job by resetting failed segments and re-running."""
     from job_runner import start_job_async
@@ -2625,6 +2723,7 @@ async def retry_job_endpoint(job_id: str, request: FastAPIRequest):
 
 
 @app.delete("/jobs/{job_id}")
+@tracecall
 async def delete_job_endpoint(job_id: str, request: FastAPIRequest):
     """Delete a job and its segments."""
     user_id, user_role = _get_user_info(request)
@@ -2639,6 +2738,7 @@ async def delete_job_endpoint(job_id: str, request: FastAPIRequest):
 
 
 @app.get("/jobs/{job_id}/audio")
+@tracecall
 async def get_combined_audio(job_id: str, request: FastAPIRequest, max_silence_ms: int = 300):
     """Get combined audio for all completed segments with silence compression."""
     user_id, user_role = _get_user_info(request)
@@ -2713,6 +2813,7 @@ class StartAnalysisRequest(BaseModel):
 
 
 @app.post("/uploads")
+@tracecall
 async def upload_file(
     request: FastAPIRequest,
     file: UploadFile = File(...),
@@ -2752,6 +2853,7 @@ async def upload_file(
 
 
 @app.post("/uploads/{upload_id}/analyze")
+@tracecall
 async def start_analysis(upload_id: str, request: FastAPIRequest):
     """Start background analysis for an upload."""
     user_id, user_role = _get_user_info(request)
@@ -2769,6 +2871,7 @@ async def start_analysis(upload_id: str, request: FastAPIRequest):
 
 
 @app.get("/uploads")
+@tracecall
 async def list_uploads(request: FastAPIRequest, limit: int = 20):
     """List recent uploads for the calling user."""
     user_id, user_role = _get_user_info(request)
@@ -2776,6 +2879,7 @@ async def list_uploads(request: FastAPIRequest, limit: int = 20):
     return {"uploads": uploads}
 
 
+@tracecall
 def _require_upload_access(upload: dict, user_id: str, user_role: str):
     """Raise 404 if user does not own the upload (admins always have access)."""
     if user_role != "administrator" and upload.get("userId") != user_id:
@@ -2783,6 +2887,7 @@ def _require_upload_access(upload: dict, user_id: str, user_role: str):
 
 
 @app.get("/uploads/{upload_id}")
+@tracecall
 async def get_upload(upload_id: str, request: FastAPIRequest):
     """Get upload status and chapters."""
     user_id, user_role = _get_user_info(request)
@@ -2794,6 +2899,7 @@ async def get_upload(upload_id: str, request: FastAPIRequest):
 
 
 @app.get("/uploads/{upload_id}/chapters/{chapter_id}/analysis")
+@tracecall
 async def get_chapter_analysis(upload_id: str, chapter_id: str, request: FastAPIRequest):
     """Get analysis results for a specific chapter."""
     user_id, user_role = _get_user_info(request)
@@ -2808,6 +2914,7 @@ async def get_chapter_analysis(upload_id: str, chapter_id: str, request: FastAPI
 
 
 @app.delete("/uploads/{upload_id}")
+@tracecall
 async def delete_upload(upload_id: str, request: FastAPIRequest):
     """Delete an upload and all its chapters."""
     user_id, user_role = _get_user_info(request)
@@ -2827,6 +2934,7 @@ class GenerateFromUploadRequest(BaseModel):
     chapterIds: Optional[list] = None
 
 
+@tracecall
 def parse_voice_id(voice_id: str) -> dict:
     """Parse voice ID string into component parts for config."""
     if voice_id.startswith("edge:"):
@@ -2840,6 +2948,7 @@ def parse_voice_id(voice_id: str) -> dict:
 
 
 @app.post("/uploads/{upload_id}/generate")
+@tracecall
 async def generate_from_upload(upload_id: str, request: GenerateFromUploadRequest, req: FastAPIRequest):
     """Generate TTS jobs from an analyzed upload."""
     gen_user_id, gen_user_role = _get_user_info(req)
@@ -2928,6 +3037,7 @@ import json
 PROSODY_SETTINGS_FILE = Path("prosody_settings.json")
 
 
+@tracecall
 def load_prosody_settings():
     """Load prosody settings from file if it exists."""
     if PROSODY_SETTINGS_FILE.exists():
@@ -2948,6 +3058,7 @@ def load_prosody_settings():
             logger.warning(f"Failed to load prosody settings: {e}")
 
 
+@tracecall
 def save_prosody_settings():
     """Save prosody settings to file."""
     data = {
@@ -2968,6 +3079,7 @@ load_prosody_settings()
 
 
 @app.get("/prosody-settings")
+@tracecall
 async def get_prosody_settings():
     """Get the current emotion prosody settings (pitch, speed, volume, intensity)."""
     return {
@@ -2987,6 +3099,7 @@ class ProsodySettingsRequest(BaseModel):
 
 
 @app.post("/prosody-settings")
+@tracecall
 async def update_prosody_settings(request: ProsodySettingsRequest, req: FastAPIRequest):
     """Update the emotion prosody settings with validation. Requires administrator role."""
     _, user_role = _get_user_info(req)
@@ -3105,6 +3218,7 @@ Important:
 - EVERY spoken segment MUST have a non-empty speaker_candidates object — never omit it"""
 
 
+@tracecall
 def _seed_parsing_prompt():
     db = get_db_session()
     try:
@@ -3121,6 +3235,7 @@ def _seed_parsing_prompt():
         db.close()
 
 
+@tracecall
 def _seed_default_pause_duration():
     db = get_db_session()
     try:
@@ -3138,6 +3253,7 @@ def _seed_default_pause_duration():
 
 
 @app.get("/parsing-prompt")
+@tracecall
 async def get_parsing_prompt():
     """Get the current parsing prompt from the database."""
     db = get_db_session()
@@ -3155,6 +3271,7 @@ class ParsingPromptRequest(BaseModel):
 
 
 @app.post("/parsing-prompt")
+@tracecall
 async def update_parsing_prompt(request: ParsingPromptRequest):
     """Save the parsing prompt to the database."""
     if not request.prompt or not request.prompt.strip():
@@ -3182,6 +3299,7 @@ ENGINE_CONCURRENCY_SETTING_KEY = "engine_concurrency"
 
 
 @app.get("/engine-concurrency")
+@tracecall
 async def get_engine_concurrency():
     """Return the max-parallel-jobs map keyed by engine_id."""
     db = get_db_session()
@@ -3199,6 +3317,7 @@ class EngineConcurrencyRequest(BaseModel):
 
 
 @app.post("/engine-concurrency")
+@tracecall
 async def update_engine_concurrency(request: EngineConcurrencyRequest, req: FastAPIRequest):
     """Save the max-parallel-jobs map. Administrator only."""
     _, user_role = _get_user_info(req)
@@ -3231,6 +3350,7 @@ async def update_engine_concurrency(request: EngineConcurrencyRequest, req: Fast
 
 TTS_SETTINGS_FILE = Path(__file__).parent.parent / "tts_settings.json"
 
+@tracecall
 def load_tts_settings():
     """Load TTS settings from file."""
     import json
@@ -3250,6 +3370,7 @@ def load_tts_settings():
             logger.warning(f"Failed to load TTS settings: {e}")
     return defaults
 
+@tracecall
 def save_tts_settings(settings: dict):
     """Save TTS settings to file."""
     import json
@@ -3269,12 +3390,14 @@ class TTSSettingsRequest(BaseModel):
 
 
 @app.get("/tts-settings")
+@tracecall
 async def get_tts_settings():
     """Get the current TTS model settings."""
     return load_tts_settings()
 
 
 @app.post("/tts-settings")
+@tracecall
 async def update_tts_settings(request: TTSSettingsRequest, req: FastAPIRequest):
     """Update the TTS model settings. Requires administrator role."""
     _, user_role = _get_user_info(req)
@@ -3340,6 +3463,7 @@ class GenerateProjectAudioRequest(BaseModel):
     onlyMissing: Optional[bool] = False
 
 
+@tracecall
 def _serialize_project_list(
     project: Project,
     chapter_count: int = 0,
@@ -3361,6 +3485,7 @@ def _serialize_project_list(
     }
 
 
+@tracecall
 def _serialize_project_full(project: Project, db) -> dict:
     chapters = db.query(ProjectChapter).filter(
         ProjectChapter.project_id == project.id
@@ -3472,6 +3597,7 @@ def _serialize_project_full(project: Project, db) -> dict:
 
 
 @app.get("/projects")
+@tracecall
 async def list_projects(request: FastAPIRequest):
     user_id, user_role = _get_user_info(request)
     db = get_db_session()
@@ -3717,6 +3843,7 @@ async def list_projects(request: FastAPIRequest):
         db.close()
 
 
+@tracecall
 def _title_exists(db, user_id: Optional[str], candidate: str) -> bool:
     """Check if a project with this title already exists for the user."""
     query = db.query(Project).filter(Project.title == candidate)
@@ -3725,6 +3852,7 @@ def _title_exists(db, user_id: Optional[str], candidate: str) -> bool:
     return query.first() is not None
 
 
+@tracecall
 def _generate_unique_title(db, user_id: Optional[str], base_title: str) -> str:
     """Return base_title if unique, otherwise append ' #2', ' #3', etc."""
     if not _title_exists(db, user_id, base_title):
@@ -3737,6 +3865,7 @@ def _generate_unique_title(db, user_id: Optional[str], base_title: str) -> str:
         n += 1
 
 
+@tracecall
 def _generate_untitled_name(db, user_id: Optional[str]) -> str:
     """Return 'Untitled Book #X' where X is the smallest unused integer >= 1."""
     n = 1
@@ -3748,6 +3877,7 @@ def _generate_untitled_name(db, user_id: Optional[str]) -> str:
 
 
 @app.post("/projects")
+@tracecall
 async def create_project(
     request: FastAPIRequest,
     title: str = Form(""),
@@ -3870,6 +4000,7 @@ async def create_project(
 
 
 @app.get("/projects/{project_id}")
+@tracecall
 async def get_project(project_id: str, request: FastAPIRequest):
     user_id, user_role = _get_user_info(request)
     db = get_db_session()
@@ -3881,6 +4012,7 @@ async def get_project(project_id: str, request: FastAPIRequest):
 
 
 @app.patch("/projects/{project_id}")
+@tracecall
 async def update_project(project_id: str, request: UpdateProjectSettingsRequest, req: FastAPIRequest):
     user_id, user_role = _get_user_info(req)
     db = get_db_session()
@@ -3929,6 +4061,7 @@ async def update_project(project_id: str, request: UpdateProjectSettingsRequest,
 
 
 @app.delete("/projects/{project_id}")
+@tracecall
 async def delete_project(project_id: str, request: FastAPIRequest):
     user_id, user_role = _get_user_info(request)
     db = get_db_session()
@@ -3950,6 +4083,7 @@ async def delete_project(project_id: str, request: FastAPIRequest):
 
 
 @app.patch("/projects/{project_id}/chapters/{chapter_id}")
+@tracecall
 async def update_chapter(project_id: str, chapter_id: str, request: UpdateChapterRequest, req: FastAPIRequest):
     user_id, user_role = _get_user_info(req)
     db = get_db_session()
@@ -3977,6 +4111,7 @@ async def update_chapter(project_id: str, chapter_id: str, request: UpdateChapte
 
 
 @app.patch("/projects/{project_id}/chunks/{chunk_id}")
+@tracecall
 async def update_chunk(project_id: str, chunk_id: str, request: UpdateChunkRequest, req: FastAPIRequest):
     user_id, user_role = _get_user_info(req)
     db = get_db_session()
@@ -4005,6 +4140,7 @@ async def update_chunk(project_id: str, chunk_id: str, request: UpdateChunkReque
 
 
 @app.post("/projects/{project_id}/chunks/bulk-update")
+@tracecall
 async def bulk_update_chunks(project_id: str, request: BulkUpdateChunksRequest, req: FastAPIRequest):
     user_id, user_role = _get_user_info(req)
     db = get_db_session()
@@ -4042,6 +4178,7 @@ async def bulk_update_chunks(project_id: str, request: BulkUpdateChunksRequest, 
 WORDS_PER_SECOND = 2.5
 
 @app.post("/projects/{project_id}/chunks/{chunk_id}/combine-with-previous")
+@tracecall
 async def combine_chunk_with_previous(project_id: str, chunk_id: str, request: FastAPIRequest):
     user_id, user_role = _get_user_info(request)
     db = get_db_session()
@@ -4097,6 +4234,7 @@ class BatchChunkUpdateRequest(BaseModel):
     updates: list[BatchChunkUpdate]
 
 @app.post("/projects/{project_id}/chunks/batch-update")
+@tracecall
 async def batch_update_chunks(project_id: str, request: BatchChunkUpdateRequest, req: FastAPIRequest):
     user_id, user_role = _get_user_info(req)
     db = get_db_session()
@@ -4153,6 +4291,7 @@ class MergeSpeakersRequest(BaseModel):
 
 
 @app.post("/projects/{project_id}/speakers/merge")
+@tracecall
 async def merge_speakers(project_id: str, request: MergeSpeakersRequest, req: FastAPIRequest):
     user_id, user_role = _get_user_info(req)
     db = get_db_session()
@@ -4203,6 +4342,7 @@ class SegmentProjectRequest(BaseModel):
     merge_short_chunks: bool = True
 
 @app.post("/projects/{project_id}/segment")
+@tracecall
 async def segment_project(project_id: str, req: FastAPIRequest, request: Optional[SegmentProjectRequest] = None):
     user_id, user_role = _get_user_info(req)
     model = request.model if request else "openai/gpt-4.1-mini"
@@ -4244,6 +4384,7 @@ async def segment_project(project_id: str, req: FastAPIRequest, request: Optiona
 
 
 @app.post("/projects/{project_id}/merge-short-chunks")
+@tracecall
 async def merge_project_short_chunks(project_id: str, req: FastAPIRequest):
     """Apply merge-short-chunks post-processing to all segmented sections of an existing project."""
     user_id, user_role = _get_user_info(req)
@@ -4264,6 +4405,7 @@ class RechunkSectionRequest(BaseModel):
 
 
 @app.post("/projects/{project_id}/sections/{section_id}/rechunk")
+@tracecall
 async def rechunk_section_endpoint(project_id: str, section_id: str, req: FastAPIRequest, request: Optional[RechunkSectionRequest] = None):
     user_id, user_role = _get_user_info(req)
     model = request.model if request and request.model else "openai/gpt-4.1-mini"
@@ -4283,6 +4425,7 @@ async def rechunk_section_endpoint(project_id: str, section_id: str, req: FastAP
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@tracecall
 def _build_segment_data(chunk, chapter, tts_engine, narrator_voice_id, speakers):
     """Build a segment dict from a chunk for job creation."""
     ch_engine = chapter.tts_engine or tts_engine
@@ -4306,6 +4449,7 @@ def _build_segment_data(chunk, chapter, tts_engine, narrator_voice_id, speakers)
 
 
 @app.post("/projects/{project_id}/generate")
+@tracecall
 async def generate_project_audio(project_id: str, request: GenerateProjectAudioRequest, req: FastAPIRequest):
     user_id, user_role = _get_user_info(req)
     db = get_db_session()
@@ -4523,6 +4667,7 @@ async def generate_project_audio(project_id: str, request: GenerateProjectAudioR
 
 
 @app.get("/projects/{project_id}/audio")
+@tracecall
 async def list_project_audio(project_id: str, request: FastAPIRequest):
     user_id, user_role = _get_user_info(request)
     db = get_db_session()
@@ -4549,6 +4694,7 @@ async def list_project_audio(project_id: str, request: FastAPIRequest):
         db.close()
 
 
+@tracecall
 def _delete_export_file(af: ProjectAudioFile):
     if af.file_path:
         try:
@@ -4558,6 +4704,7 @@ def _delete_export_file(af: ProjectAudioFile):
 
 
 @app.get("/projects/{project_id}/audio/{audio_file_id}")
+@tracecall
 async def get_project_audio(project_id: str, audio_file_id: str, request: FastAPIRequest):
     user_id, user_role = _get_user_info(request)
     db = get_db_session()
@@ -4592,6 +4739,7 @@ async def get_project_audio(project_id: str, audio_file_id: str, request: FastAP
 
 
 @app.post("/projects/{project_id}/cover")
+@tracecall
 async def upload_cover_image(project_id: str, request: FastAPIRequest, file: UploadFile = File(...)):
     user_id, user_role = _get_user_info(request)
     db = get_db_session()
@@ -4611,6 +4759,7 @@ async def upload_cover_image(project_id: str, request: FastAPIRequest, file: Upl
 
 
 @app.get("/projects/{project_id}/cover")
+@tracecall
 async def get_cover_image(project_id: str, request: FastAPIRequest):
     user_id, user_role = _get_user_info(request)
     db = get_db_session()
@@ -4631,6 +4780,7 @@ async def get_cover_image(project_id: str, request: FastAPIRequest):
 
 
 @app.delete("/projects/{project_id}/cover")
+@tracecall
 async def delete_cover_image(project_id: str, request: FastAPIRequest):
     user_id, user_role = _get_user_info(request)
     db = get_db_session()
@@ -4645,6 +4795,7 @@ async def delete_cover_image(project_id: str, request: FastAPIRequest):
         db.close()
 
 
+@tracecall
 def _filter_missing_chunks(db, project_id: str, chunks):
     """Filter chunks to only those that don't have an existing audio file."""
     chunk_ids = [c.id for c in chunks]
@@ -4657,6 +4808,7 @@ def _filter_missing_chunks(db, project_id: str, chunks):
     return [c for c in chunks if c.id not in existing_ids]
 
 
+@tracecall
 def _gather_chunk_audio_blobs(db, project_id: str, chunk_ids: list):
     """Gather latest audio blobs for the given chunk IDs, in order."""
     from sqlalchemy import func
@@ -4687,6 +4839,7 @@ def _gather_chunk_audio_blobs(db, project_id: str, chunk_ids: list):
 
 
 @app.get("/projects/{project_id}/download")
+@tracecall
 async def download_project_audio(project_id: str, scope: str = "project", scopeId: str = ""):
     from job_runner import _concatenate_mp3_blobs
 
@@ -4768,6 +4921,7 @@ async def download_project_audio(project_id: str, scope: str = "project", scopeI
 
 
 @app.get("/projects/{project_id}/audio-stats")
+@tracecall
 async def get_project_audio_stats(project_id: str):
     """Get counts of chunks with audio at each scope level."""
     db = get_db_session()
@@ -4833,6 +4987,7 @@ async def get_project_audio_stats(project_id: str):
 
 
 @app.post("/projects/{project_id}/export")
+@tracecall
 async def export_project_async(project_id: str, request: FastAPIRequest):
     from export_runner import create_export_job
 
@@ -4853,6 +5008,7 @@ async def export_project_async(project_id: str, request: FastAPIRequest):
 
 
 @app.delete("/projects/{project_id}/audio/{audio_file_id}")
+@tracecall
 async def delete_project_audio(project_id: str, audio_file_id: str, request: FastAPIRequest):
     user_id, user_role = _get_user_info(request)
     db = get_db_session()
@@ -4873,6 +5029,7 @@ async def delete_project_audio(project_id: str, audio_file_id: str, request: Fas
 
 
 @app.get("/projects/{project_id}/source-file")
+@tracecall
 async def download_project_source_file(project_id: str, request: FastAPIRequest):
     """Download the original source file (epub/txt) stored when the project was created."""
     user_id, user_role = _get_user_info(request)
@@ -4894,6 +5051,7 @@ async def download_project_source_file(project_id: str, request: FastAPIRequest)
 
 
 @app.get("/projects/{project_id}/backup")
+@tracecall
 async def backup_project(
     project_id: str,
     request: FastAPIRequest,

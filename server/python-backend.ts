@@ -1,5 +1,6 @@
 import { spawn, ChildProcess } from "child_process";
 import { log } from "./index";
+import { logTrace, logInfo, logWarn, logError } from "./logger";
 import path from "path";
 
 let pythonProcess: ChildProcess | null = null;
@@ -10,35 +11,47 @@ export async function startPythonBackend(): Promise<void> {
     const venvPython = path.join(process.cwd(), ".venv", "bin", "python");
     const pythonBin = require("fs").existsSync(venvPython) ? venvPython : "python";
 
-    log("Starting Python FastAPI backend...", "python");
+    logTrace("Resolved Python binary", { source: "python", pythonBin, backendDir });
+    logInfo("Starting Python FastAPI backend...", { source: "python" });
 
     pythonProcess = spawn(pythonBin, ["-m", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", "8000"], {
       cwd: backendDir,
       stdio: ["ignore", "pipe", "pipe"],
       env: { ...process.env },
     });
-    
+
     pythonProcess.stdout?.on("data", (data) => {
       const output = data.toString().trim();
       if (output) {
-        log(output, "python");
+        logInfo(output, { source: "python" });
       }
     });
-    
+
     pythonProcess.stderr?.on("data", (data) => {
       const output = data.toString().trim();
       if (output) {
-        log(output, "python-err");
+        // Python logs INFO/DEBUG to stderr via uvicorn — route appropriately
+        if (/error|exception|traceback/i.test(output)) {
+          logError(output, { source: "python" });
+        } else if (/warn/i.test(output)) {
+          logWarn(output, { source: "python" });
+        } else {
+          logInfo(output, { source: "python" });
+        }
       }
     });
-    
+
     pythonProcess.on("error", (err) => {
-      log(`Failed to start Python backend: ${err.message}`, "python-err");
+      logError(`Failed to start Python backend: ${err.message}`, { source: "python", err: err.message });
       reject(err);
     });
-    
+
     pythonProcess.on("exit", (code) => {
-      log(`Python backend exited with code ${code}`, "python");
+      if (code === 0 || code === null) {
+        logInfo(`Python backend exited with code ${code}`, { source: "python", code });
+      } else {
+        logWarn(`Python backend exited with code ${code}`, { source: "python", code });
+      }
       pythonProcess = null;
     });
     
@@ -71,7 +84,7 @@ export async function startPythonBackend(): Promise<void> {
 
 export function stopPythonBackend(): void {
   if (pythonProcess) {
-    log("Stopping Python backend...", "python");
+    logInfo("Stopping Python backend...", { source: "python" });
     pythonProcess.kill();
     pythonProcess = null;
   }
