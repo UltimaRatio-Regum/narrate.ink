@@ -45,9 +45,11 @@ services:
       - uploads:/app/uploads
       - backend-uploads:/app/backend/uploads
       - exports:/app/exports
+      - logs:/app/logs
 
 volumes:
   pgdata:
   uploads:
   backend-uploads:
   exports:
+  logs:

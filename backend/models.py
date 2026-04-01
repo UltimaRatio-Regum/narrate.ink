@@ -4,6 +4,7 @@ Pydantic models for the Narrator AI API
 
 from typing import Optional
 from pydantic import BaseModel
+from narrate_ink_logger import tracecall
 
 
 class Sentiment(BaseModel):

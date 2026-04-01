@@ -13,6 +13,7 @@ from database import (
     get_db_session, Project, ProjectChapter, ProjectSection, ProjectChunk,
     AppSetting,
 )
+from narrate_ink_logger import tracecall
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,7 @@ logger = logging.getLogger(__name__)
 _chapter_chars_in_progress: dict[str, int] = {}
 
 
+@tracecall
 def get_chapter_chars_in_progress(project_id: str) -> int:
     return _chapter_chars_in_progress.get(project_id, 0)
 
@@ -40,6 +42,7 @@ CANONICAL_EMOTIONS = [
 PARSING_PROMPT_SETTING_KEY = "parsing_prompt"
 
 
+@tracecall
 def _load_prompt() -> Optional[str]:
     db = get_db_session()
     try:
@@ -54,6 +57,7 @@ def _load_prompt() -> Optional[str]:
         db.close()
 
 
+@tracecall
 def split_into_sections(raw_text: str, word_limit: int = SECTION_WORD_LIMIT) -> list[str]:
     paragraphs = [p.strip() for p in raw_text.split("\n\n") if p.strip()]
 
@@ -90,6 +94,7 @@ def split_into_sections(raw_text: str, word_limit: int = SECTION_WORD_LIMIT) -> 
     return sections
 
 
+@tracecall
 def _rechunk_segment(text: str, max_words: int = 40) -> list[str]:
     words = text.split()
     if len(words) <= max_words:
@@ -134,6 +139,7 @@ Return ONLY a JSON object:
 }"""
 
 
+@tracecall
 async def _split_overlength_segments(
     segments: list[dict],
     client: httpx.AsyncClient,
@@ -208,6 +214,7 @@ async def _split_overlength_segments(
     return result
 
 
+@tracecall
 def _normalize_llm_response(data: dict) -> dict:
     if not isinstance(data, dict):
         raise ValueError("LLM response is not a dict")
@@ -300,6 +307,7 @@ def _normalize_llm_response(data: dict) -> dict:
     }
 
 
+@tracecall
 async def _call_llm_for_section(
     client: httpx.AsyncClient,
     section_text: str,
@@ -375,6 +383,7 @@ Return ONLY valid JSON, no markdown fences."""
         raise
 
 
+@tracecall
 def _split_section_by_chunk_count(db, section, max_chunks: int = MAX_CHUNKS_PER_SECTION):
     chunks = db.query(ProjectChunk).filter(
         ProjectChunk.section_id == section.id
@@ -415,6 +424,7 @@ def _split_section_by_chunk_count(db, section, max_chunks: int = MAX_CHUNKS_PER_
     return new_sections
 
 
+@tracecall
 def _reindex_sections(db, chapter_id: str):
     sections = db.query(ProjectSection).filter(
         ProjectSection.chapter_id == chapter_id
@@ -425,6 +435,7 @@ def _reindex_sections(db, chapter_id: str):
     db.commit()
 
 
+@tracecall
 def _generate_section_titles(db, chapter_id: str, model: str = "openai/gpt-4.1-mini"):
     base_url = os.environ.get("AI_INTEGRATIONS_OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
     api_key = os.environ.get("AI_INTEGRATIONS_OPENROUTER_API_KEY", "")
@@ -500,6 +511,7 @@ def _generate_section_titles(db, chapter_id: str, model: str = "openai/gpt-4.1-m
         logger.warning(f"Failed to generate section titles: {e}")
 
 
+@tracecall
 def _build_flat_segments(result_segments: list[dict]) -> list[dict]:
     """Expand LLM segments through rechunking into a flat list of chunk dicts."""
     flat = []
@@ -520,6 +532,7 @@ def _build_flat_segments(result_segments: list[dict]) -> list[dict]:
     return flat
 
 
+@tracecall
 def _merge_short_chunks(segments: list[dict]) -> list[dict]:
     """
     Post-process a flat segment list in three passes, then strip stragglers.
@@ -539,9 +552,11 @@ def _merge_short_chunks(segments: list[dict]) -> list[dict]:
     if not segments:
         return segments
 
+    @tracecall
     def _is_punct_only(text: str) -> bool:
         return bool(text.strip()) and not re.search(r"[a-zA-Z0-9]", text)
 
+    @tracecall
     def _join(a: str, b: str) -> str:
         """Join two texts; skip the space when b opens with punctuation."""
         a = a.rstrip()
@@ -594,6 +609,7 @@ def _merge_short_chunks(segments: list[dict]) -> list[dict]:
     return segs
 
 
+@tracecall
 async def rechunk_section(project_id: str, section_id: str, model: str = DEFAULT_MODEL):
     """Re-chunk a single section using the same context the LLM had during original segmentation."""
     base_url = os.environ.get("AI_INTEGRATIONS_OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
@@ -711,6 +727,7 @@ async def rechunk_section(project_id: str, section_id: str, model: str = DEFAULT
         db.close()
 
 
+@tracecall
 def apply_merge_short_chunks(project_id: str) -> int:
     """
     Run _merge_short_chunks post-processing on all already-segmented sections of a project.
@@ -782,6 +799,7 @@ def apply_merge_short_chunks(project_id: str) -> int:
         db.close()
 
 
+@tracecall
 def segment_project_background(project_id: str, model: str = DEFAULT_MODEL, merge_short_chunks: bool = True):
     thread = threading.Thread(
         target=_run_segmentation_wrapper,
@@ -792,10 +810,12 @@ def segment_project_background(project_id: str, model: str = DEFAULT_MODEL, merg
     return thread
 
 
+@tracecall
 def _run_segmentation_wrapper(project_id: str, model: str, merge_short_chunks: bool = True):
     asyncio.run(_run_segmentation(project_id, model, merge_short_chunks))
 
 
+@tracecall
 async def _run_segmentation(project_id: str, model: str, merge_short_chunks: bool = True):
     base_url = os.environ.get("AI_INTEGRATIONS_OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
     api_key = os.environ.get("AI_INTEGRATIONS_OPENROUTER_API_KEY", "")

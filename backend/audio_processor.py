@@ -6,6 +6,7 @@ import numpy as np
 import soundfile as sf
 from pathlib import Path
 from typing import Optional
+from narrate_ink_logger import tracecall
 
 try:
     import pyrubberband as pyrb
@@ -130,6 +131,7 @@ class AudioProcessor:
     
     VALID_EMOTIONS = list(EMOTION_PITCH_MAP.keys())
     
+    @tracecall
     def get_audio_duration(self, file_path: str) -> float:
         """Get the duration of an audio file in seconds."""
         try:
@@ -138,10 +140,12 @@ class AudioProcessor:
         except Exception:
             return 0.0
     
+    @tracecall
     def save_audio(self, file_path: str, data: np.ndarray, sample_rate: int):
         """Save audio data to file."""
         sf.write(file_path, data, sample_rate)
     
+    @tracecall
     def apply_emotion_prosody(
         self,
         audio_data: np.ndarray,
@@ -201,6 +205,7 @@ class AudioProcessor:
         
         return processed
     
+    @tracecall
     def apply_sentiment_prosody(
         self,
         audio_data: np.ndarray,
@@ -219,6 +224,7 @@ class AudioProcessor:
             base_pitch_offset, base_speed_factor, base_volume_factor
         )
     
+    @tracecall
     def get_sentiment_prosody_adjustments(
         self,
         sentiment_label: str,
@@ -261,6 +267,7 @@ class AudioProcessor:
             "volume": volume_factor,
         }
     
+    @tracecall
     def apply_pitch_shift(
         self,
         audio_data: np.ndarray,
@@ -272,6 +279,7 @@ class AudioProcessor:
             return audio_data
         return pyrb.pitch_shift(audio_data, sample_rate, semitones)
     
+    @tracecall
     def apply_time_stretch(
         self,
         audio_data: np.ndarray,
@@ -284,6 +292,7 @@ class AudioProcessor:
         factor = max(0.5, min(2.0, factor))
         return pyrb.time_stretch(audio_data, sample_rate, factor)
     
+    @tracecall
     def concatenate_audio(
         self,
         audio_chunks: list[np.ndarray],
@@ -316,6 +325,7 @@ class AudioProcessor:
         
         return np.concatenate(result_parts)
     
+    @tracecall
     def normalize_audio(
         self,
         audio_data: np.ndarray,
@@ -334,6 +344,7 @@ class AudioProcessor:
         
         return normalized
     
+    @tracecall
     def trim_silence_edges(
         self,
         audio_data: np.ndarray,
@@ -397,6 +408,7 @@ class AudioProcessor:
         
         return audio_data[start_sample:end_sample].astype(np.float32)
     
+    @tracecall
     def truncate_at_long_silence(
         self,
         audio_data: np.ndarray,
@@ -469,6 +481,7 @@ class AudioProcessor:
         # No long silence found, return original
         return audio_data.astype(np.float32)
     
+    @tracecall
     def aggressive_silence_trim(
         self,
         audio_data: np.ndarray,
@@ -509,6 +522,7 @@ class AudioProcessor:
         
         return audio_data
     
+    @tracecall
     def trim_trailing_silence(
         self,
         audio_data: np.ndarray,
@@ -534,6 +548,7 @@ class AudioProcessor:
             audio_data, sample_rate, block_ms, silence_threshold, long_silence_ms=2000
         )
     
+    @tracecall
     def compress_silence_gaps(
         self,
         audio_data: np.ndarray,

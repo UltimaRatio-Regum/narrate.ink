@@ -154,7 +154,7 @@ export async function setupAuth(app: Express) {
   passport.deserializeUser(async (id: string, done) => {
     try {
       const user = await findUserById(id);
-      if (user && !user.is_enabled) {
+      if (!user || !user.is_enabled) {
         return done(null, false);
       }
       done(null, user);

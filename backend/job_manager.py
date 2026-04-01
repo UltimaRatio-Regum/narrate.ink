@@ -16,6 +16,7 @@ from database import (
     TTSJob, TTSSegment, JobStatus, SegmentStatus, 
     get_db_session, init_database
 )
+from narrate_ink_logger import tracecall
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,7 @@ _cancel_tokens: Dict[str, threading.Event] = {}
 job_executor = ThreadPoolExecutor(max_workers=4)
 
 
+@tracecall
 def create_job(
     title: str,
     segments: List[Dict[str, Any]],
@@ -80,6 +82,7 @@ def create_job(
         db.close()
 
 
+@tracecall
 def get_job(job_id: str) -> Optional[Dict[str, Any]]:
     """Get job status and info."""
     db = get_db_session()
@@ -93,6 +96,7 @@ def get_job(job_id: str) -> Optional[Dict[str, Any]]:
         db.close()
 
 
+@tracecall
 def _serialize_job(job: TTSJob) -> Dict[str, Any]:
     """Serialize a TTSJob to a dict for API responses."""
     job_type = getattr(job, 'job_type', 'tts') or 'tts'
@@ -126,6 +130,7 @@ _STATUS_FILTER_MAP = {
 }
 
 
+@tracecall
 def get_all_jobs(include_completed: bool = True, limit: int = 20, offset: int = 0,
                  user_id: str = None, user_role: str = "user",
                  status_filter: str = "all", sort_order: str = "desc") -> Dict[str, Any]:
@@ -157,6 +162,7 @@ def get_all_jobs(include_completed: bool = True, limit: int = 20, offset: int = 
         db.close()
 
 
+@tracecall
 def get_job_segments(job_id: str, completed_only: bool = False) -> List[Dict[str, Any]]:
     """Get segments for a job."""
     db = get_db_session()
@@ -186,6 +192,7 @@ def get_job_segments(job_id: str, completed_only: bool = False) -> List[Dict[str
         db.close()
 
 
+@tracecall
 def get_segment_audio(segment_id: str) -> Optional[bytes]:
     """Get audio data for a segment."""
     db = get_db_session()
@@ -206,6 +213,7 @@ def get_segment_audio(segment_id: str) -> Optional[bytes]:
         db.close()
 
 
+@tracecall
 def update_job_status(job_id: str, status: JobStatus, error_message: str = None):
     """Update job status."""
     db = get_db_session()
@@ -220,6 +228,7 @@ def update_job_status(job_id: str, status: JobStatus, error_message: str = None)
         db.close()
 
 
+@tracecall
 def update_segment_status(
     segment_id: str, 
     status: SegmentStatus, 
@@ -260,6 +269,7 @@ def update_segment_status(
         db.close()
 
 
+@tracecall
 def cancel_job(job_id: str) -> bool:
     """Cancel a running or waiting job."""
     from job_runner import remove_job_from_engine_queue
@@ -276,6 +286,7 @@ def cancel_job(job_id: str) -> bool:
     return True
 
 
+@tracecall
 def delete_job(job_id: str) -> bool:
     """Delete a job and its segments using bulk SQL to avoid loading blobs."""
     cancel_job(job_id)
@@ -315,6 +326,7 @@ def delete_job(job_id: str) -> bool:
         db.close()
 
 
+@tracecall
 async def cleanup_old_jobs(max_age_hours: int = 24):
     """Clean up jobs older than max_age_hours using bulk deletion."""
     db = get_db_session()
@@ -357,6 +369,7 @@ async def cleanup_old_jobs(max_age_hours: int = 24):
         db.close()
 
 
+@tracecall
 async def run_cleanup_loop():
     """Background task to periodically clean up old jobs."""
     while True:

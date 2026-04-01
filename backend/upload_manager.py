@@ -14,16 +14,19 @@ from epub_parser import parse_epub, parse_txt
 from text_parser import TextParser
 
 import logging
+from narrate_ink_logger import tracecall
 logger = logging.getLogger(__name__)
 
 
 class UploadManager:
     """Manages file uploads and their analysis."""
     
+    @tracecall
     def __init__(self):
         self.parser = TextParser()
         self._analysis_threads: Dict[str, threading.Thread] = {}
     
+    @tracecall
     def create_upload(
         self,
         filename: str,
@@ -84,6 +87,7 @@ class UploadManager:
         finally:
             db.close()
     
+    @tracecall
     def start_analysis(self, upload_id: str):
         """
         Start background analysis for an upload.
@@ -107,6 +111,7 @@ class UploadManager:
         
         logger.info(f"Started analysis thread for upload {upload_id}")
     
+    @tracecall
     def _run_analysis(self, upload_id: str):
         """Background thread for analyzing chapters."""
         db = get_db_session()
@@ -205,6 +210,7 @@ class UploadManager:
             if upload_id in self._analysis_threads:
                 del self._analysis_threads[upload_id]
     
+    @tracecall
     def get_upload(self, upload_id: str) -> Optional[Dict[str, Any]]:
         """Get upload with its chapters and analysis status."""
         db = get_db_session()
@@ -256,6 +262,7 @@ class UploadManager:
         finally:
             db.close()
     
+    @tracecall
     def get_chapter_analysis(self, chapter_id: str) -> Optional[Dict[str, Any]]:
         """Get analysis results for a specific chapter."""
         db = get_db_session()
@@ -268,6 +275,7 @@ class UploadManager:
         finally:
             db.close()
     
+    @tracecall
     def list_uploads(self, limit: int = 20, user_id: str = None, user_role: str = "user") -> List[Dict[str, Any]]:
         """List recent uploads, filtered by user unless the caller is an administrator."""
         db = get_db_session()
@@ -299,6 +307,7 @@ class UploadManager:
         finally:
             db.close()
     
+    @tracecall
     def delete_upload(self, upload_id: str) -> bool:
         """Delete an upload and all its chapters."""
         db = get_db_session()

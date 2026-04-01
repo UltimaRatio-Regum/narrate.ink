@@ -13,6 +13,7 @@ import tempfile
 
 from models import TextSegment, ProjectConfig, Sentiment
 from audio_processor import AudioProcessor
+from narrate_ink_logger import tracecall
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,7 @@ SENTIMENT_EXAGGERATION_MAP = {
 }
 
 
+@tracecall
 def get_sentiment_exaggeration(sentiment_label: str, sentiment_score: float, base_exaggeration: float = 0.5) -> float:
     """
     Calculate Chatterbox exaggeration parameter based on segment sentiment.
@@ -100,6 +102,7 @@ class TTSService:
     - edge-tts for high-quality neural TTS (default)
     """
     
+    @tracecall
     def __init__(self):
         self.model = None
         self.sample_rate = 24000
@@ -112,6 +115,7 @@ class TTSService:
             except Exception as e:
                 logger.warning(f"Failed to load Chatterbox: {e}")
     
+    @tracecall
     async def generate_audiobook_async(
         self,
         segments: list[TextSegment],
@@ -255,6 +259,7 @@ class TTSService:
         
         return output_path
     
+    @tracecall
     def generate_audiobook(
         self,
         segments: list[TextSegment],
@@ -271,6 +276,7 @@ class TTSService:
             segments, config, voice_files, output_path, audio_processor, progress_callback
         ))
     
+    @tracecall
     async def _generate_segment_audio_async(
         self,
         text: str,
@@ -314,6 +320,7 @@ class TTSService:
         else:
             raise ValueError(f"Unknown TTS engine: {tts_engine}")
     
+    @tracecall
     async def _generate_with_chatterbox_free(
         self,
         text: str,
@@ -343,6 +350,7 @@ class TTSService:
         # Try HuggingFace Spaces via Gradio client
         return await self._generate_with_chatterbox_gradio(text, voice_path, exaggeration)
     
+    @tracecall
     async def _generate_with_chatterbox_paid(
         self,
         text: str,
@@ -427,6 +435,7 @@ class TTSService:
             # Run in executor to avoid blocking
             loop = asyncio.get_running_loop()
             
+            @tracecall
             def call_gradio():
                 import httpx
                 
@@ -525,6 +534,7 @@ class TTSService:
             logger.error(f"Chatterbox paid space failed: {e}")
             raise RuntimeError(f"Chatterbox Paid generation failed: {e}") from e
     
+    @tracecall
     async def _generate_with_chatterbox_gradio(
         self,
         text: str,
@@ -562,6 +572,7 @@ class TTSService:
             text = truncated
             logger.warning(f"Text truncated to {len(text)} characters for Chatterbox")
         
+        @tracecall
         def call_gradio():
             client = Client("ResembleAI/Chatterbox")
             result = client.predict(
@@ -611,6 +622,7 @@ class TTSService:
         
         return audio.astype(np.float32)
     
+    @tracecall
     async def _generate_with_openai(self, text: str, voice: str = "alloy") -> np.ndarray:
         """
         Generate audio using OpenAI TTS API.
@@ -643,6 +655,7 @@ class TTSService:
             
             return await self._mp3_bytes_to_numpy(response.content)
     
+    @tracecall
     async def _generate_with_piper(self, text: str, voice_path: Optional[str] = None) -> np.ndarray:
         """
         Generate audio using Piper TTS (open source, fast).
@@ -685,6 +698,7 @@ class TTSService:
             if os.path.exists(output_path):
                 os.unlink(output_path)
     
+    @tracecall
     async def _generate_with_styletts2(
         self, 
         text: str, 
@@ -755,6 +769,7 @@ class TTSService:
         
         loop = asyncio.get_running_loop()
         
+        @tracecall
         def call_gradio():
             httpx_kwargs = {
                 "timeout": httpx.Timeout(timeout_secs, connect=60.0)
@@ -788,6 +803,7 @@ class TTSService:
         # StyleTTS2 has native speed/pitch control, no pyrubberband needed
         return audio.astype(np.float32)
     
+    @tracecall
     async def _generate_with_soprano(self, text: str) -> np.ndarray:
         """
         Generate audio using Soprano TTS (ekwek/Soprano-1.1-80M).
@@ -799,6 +815,7 @@ class TTSService:
         
         loop = asyncio.get_running_loop()
         
+        @tracecall
         def generate_sync():
             device = 'cuda' if torch.cuda.is_available() else 'cpu'
             logger.info(f"Soprano TTS using device: {device}")
@@ -829,6 +846,7 @@ class TTSService:
         logger.info(f"Soprano TTS generated {len(audio)/self.sample_rate:.2f}s of audio")
         return audio.astype(np.float32)
     
+    @tracecall
     async def _generate_with_edge_tts(self, text: str, voice: str = "en-US-AriaNeural") -> np.ndarray:
         """
         Generate audio using edge-tts (Microsoft Azure Neural TTS).
@@ -847,6 +865,7 @@ class TTSService:
         audio_array = await self._mp3_bytes_to_numpy(audio_data)
         return audio_array
     
+    @tracecall
     async def _mp3_bytes_to_numpy(self, mp3_data: bytes) -> np.ndarray:
         """
         Convert MP3 bytes to numpy array at target sample rate.
@@ -883,6 +902,7 @@ class TTSService:
                 if os.path.exists(temp_path):
                     os.unlink(temp_path)
     
+    @tracecall
     def _synthesize_fallback(self, text: str) -> np.ndarray:
         """
         Simple sine wave fallback if all TTS fails.
@@ -895,6 +915,7 @@ class TTSService:
         return audio
 
 
+@tracecall
 async def list_edge_voices():
     """List all available edge-tts voices."""
     if not EDGE_TTS_AVAILABLE:

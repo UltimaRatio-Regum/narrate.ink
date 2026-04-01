@@ -17,12 +17,14 @@ from database import (
     ProjectChapter, ProjectSection, ProjectChunk, Project, AppSetting
 )
 from audio_export import export_single_mp3, export_mp3_per_chapter, export_m4b
+from narrate_ink_logger import tracecall
 
 logger = logging.getLogger(__name__)
 
 _export_executor = ThreadPoolExecutor(max_workers=2)
 
 
+@tracecall
 def create_export_job(project_id: str, export_format: str, user_id: str) -> dict:
     db = get_db_session()
     try:
@@ -57,6 +59,7 @@ def create_export_job(project_id: str, export_format: str, user_id: str) -> dict
     return result
 
 
+@tracecall
 def _set_progress(job, db, total_chunks: int, pct: float, message: str):
     job.total_segments = total_chunks
     job.completed_segments = round(pct * total_chunks)
@@ -68,6 +71,7 @@ def _set_progress(job, db, total_chunks: int, pct: float, message: str):
         logger.debug(f"Export progress commit failed: {exc}")
 
 
+@tracecall
 def _run_export(job_id: str):
     db = get_db_session()
     try:
@@ -130,6 +134,7 @@ def _run_export(job_id: str):
             db.commit()
             return
 
+        @tracecall
         def _export_progress(phase: str, current: int, total: int, message: str):
             if phase == "decode":
                 pct = current / max(total, 1)

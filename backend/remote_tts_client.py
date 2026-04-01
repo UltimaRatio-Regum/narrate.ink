@@ -10,6 +10,7 @@ import logging
 import httpx
 from typing import Optional, Dict, Any, List
 from dataclasses import dataclass, field
+from narrate_ink_logger import tracecall
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,7 @@ class TTSRequest:
     engine_options: Optional[Dict[str, Any]] = None
 
 
+@tracecall
 def normalize_hf_spaces_url(url: str) -> str:
     import re
     url = url.rstrip("/")
@@ -70,16 +72,19 @@ def normalize_hf_spaces_url(url: str) -> str:
 
 
 class RemoteTTSClient:
+    @tracecall
     def __init__(self, base_url: str, api_key: Optional[str] = None):
         self.base_url = normalize_hf_spaces_url(base_url.rstrip("/"))
         self.api_key = api_key
 
+    @tracecall
     def _headers(self) -> Dict[str, str]:
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
         return headers
 
+    @tracecall
     async def get_engine_details(self) -> EngineDetails:
         async with httpx.AsyncClient(timeout=TIMEOUT_DETAILS) as client:
             resp = await client.post(
@@ -123,6 +128,7 @@ class RemoteTTSClient:
             engine_params=data.get("engine_params", []),
         )
 
+    @tracecall
     async def convert_text_to_speech(self, request: TTSRequest) -> bytes:
         payload: Dict[str, Any] = {
             "input_text": request.input_text,
@@ -165,6 +171,7 @@ class RemoteTTSClient:
             f"Error: {error_data.get('error', 'unknown')}"
         )
 
+    @tracecall
     async def wake_up(self, timeout: float = TIMEOUT_WAKE, is_cancelled=None) -> bool:
         """Poll the engine until it responds, up to timeout seconds.
         

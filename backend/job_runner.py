@@ -23,6 +23,7 @@ from job_manager import (
 from tts_service import TTSService
 from audio_processor import AudioProcessor
 from remote_tts_client import RemoteTTSClient, TTSRequest
+from narrate_ink_logger import tracecall
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,7 @@ _engine_queues: Dict[str, List[str]] = defaultdict(list)
 _engine_concurrency_cache: Dict[str, int] = {}
 
 
+@tracecall
 def _get_engine_max_parallel(engine: str) -> int:
     """Return the configured max parallel jobs for an engine (default 1). Cached in-process."""
     if engine in _engine_concurrency_cache:
@@ -54,11 +56,13 @@ def _get_engine_max_parallel(engine: str) -> int:
     return value
 
 
+@tracecall
 def invalidate_engine_concurrency_cache():
     """Clear the in-process concurrency cache so the next job picks up new DB values."""
     _engine_concurrency_cache.clear()
 
 
+@tracecall
 def _start_next_for_engine(engine: str):
     with _engine_guard:
         queue = _engine_queues.get(engine, [])
@@ -78,6 +82,7 @@ def _start_next_for_engine(engine: str):
         _engine_active[engine] = max(0, _engine_active[engine] - 1)
 
 
+@tracecall
 def _apply_emotion_smoothing(segment_data: List[Dict[str, Any]], config: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Apply narrator emotion override and dialogue emotion flattening to segments."""
     narrator_emotion = config.get("narratorEmotion", "auto")
@@ -131,6 +136,7 @@ def _apply_emotion_smoothing(segment_data: List[Dict[str, Any]], config: Dict[st
     return segment_data
 
 
+@tracecall
 async def process_job(job_id: str, cancel_token: threading.Event = None):
     """Process a TTS job - generates audio for each segment."""
     logger.info(f"Starting TTS job: {job_id}")
@@ -300,6 +306,7 @@ async def process_job(job_id: str, cancel_token: threading.Event = None):
         active_jobs.pop(job_id, None)
 
 
+@tracecall
 def _persist_project_audio(job_id: str, config: Dict[str, Any], tts_engine: str, narrator_voice_id: str):
     """After a job completes, persist completed segment audio to ProjectAudioFile.
     
@@ -381,6 +388,7 @@ def _persist_project_audio(job_id: str, config: Dict[str, Any], tts_engine: str,
         logger.error(f"Error in _persist_project_audio: {e}")
 
 
+@tracecall
 def _get_latest_chunk_audio(db, project_id: str, chunk_ids: list) -> dict:
     """Get the latest audio blob for each chunk, keyed by chunk ID."""
     from sqlalchemy import func
@@ -406,6 +414,7 @@ def _get_latest_chunk_audio(db, project_id: str, chunk_ids: list) -> dict:
     return {af.scope_id: af for af in latest}
 
 
+@tracecall
 def _create_section_combined_audio(db, job_id: str, config: Dict[str, Any], project_id: str, tts_engine: str, narrator_voice_id: str):
     """Concatenate chunk audio into a single section-level ProjectAudioFile."""
     import uuid as uuid_mod
@@ -468,6 +477,7 @@ def _create_section_combined_audio(db, job_id: str, config: Dict[str, Any], proj
     logger.info(f"Created section-level combined audio for section {section_id} ({label})")
 
 
+@tracecall
 def _check_and_create_chapter_audio(db, job_group_id: str, config: Dict[str, Any], project_id: str, tts_engine: str, narrator_voice_id: str):
     """Check if all section jobs for this chapter are done, then create chapter-level combined audio.
     
@@ -552,6 +562,7 @@ def _check_and_create_chapter_audio(db, job_group_id: str, config: Dict[str, Any
     logger.info(f"Created chapter-level combined audio for chapter {chapter_id} ({chapter_title})")
 
 
+@tracecall
 def _concatenate_mp3_blobs(mp3_blobs: List[bytes], pause_ms: int = 500) -> bytes:
     """Concatenate multiple MP3 byte blobs into a single MP3 with pauses between them.
     Uses pairwise merge for O(N log N) total bytes written instead of O(N^2)."""
@@ -591,6 +602,7 @@ def _concatenate_mp3_blobs(mp3_blobs: List[bytes], pause_ms: int = 500) -> bytes
     return buffer.getvalue()
 
 
+@tracecall
 def _get_mp3_duration(mp3_data: bytes) -> float:
     """Get duration in seconds from MP3 bytes."""
     try:
@@ -600,6 +612,7 @@ def _get_mp3_duration(mp3_data: bytes) -> float:
         return 0.0
 
 
+@tracecall
 async def generate_segment_audio(
     tts_service: TTSService,
     text: str,
@@ -708,6 +721,7 @@ async def generate_segment_audio(
         raise ValueError(f"Unknown TTS engine: {tts_engine}. Make sure the engine is registered in Settings.")
 
 
+@tracecall
 def get_remote_engine(engine_id: str):
     """Look up a registered remote TTS engine from the DB."""
     db = get_db_session()
@@ -722,6 +736,7 @@ def get_remote_engine(engine_id: str):
         db.close()
 
 
+@tracecall
 def get_library_voice_path(voice_id: str) -> str:
     """Get file path for a library voice.
     Checks filesystem first, then falls back to VoiceLibraryEntry DB table."""
@@ -757,6 +772,7 @@ def get_library_voice_path(voice_id: str) -> str:
     raise FileNotFoundError(f"Voice file not found: {voice_id}")
 
 
+@tracecall
 def get_uploaded_voice_path(voice_id: str) -> str:
     """Get file path for an uploaded voice sample.
     Checks filesystem uploads first, then falls back to CustomVoice DB table."""
@@ -784,6 +800,7 @@ def get_uploaded_voice_path(voice_id: str) -> str:
     raise FileNotFoundError(f"Uploaded voice not found: {voice_id}")
 
 
+@tracecall
 def convert_to_mp3(audio: np.ndarray, sample_rate: int) -> bytes:
     """Convert numpy audio array to MP3 bytes."""
     audio_int16 = (audio * 32767).astype(np.int16)
@@ -800,10 +817,12 @@ def convert_to_mp3(audio: np.ndarray, sample_rate: int) -> bytes:
     return buffer.getvalue()
 
 
+@tracecall
 def _launch_job_thread(job_id: str, engine: str):
     cancel_token = threading.Event()
     _cancel_tokens[job_id] = cancel_token
 
+    @tracecall
     def run_in_thread():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -825,6 +844,7 @@ def _launch_job_thread(job_id: str, engine: str):
     logger.info(f"Started job {job_id} for engine '{engine}' in background thread")
 
 
+@tracecall
 def start_job_async(job_id: str):
     """Start processing a job, or queue it if the engine is at capacity."""
     db = get_db_session()
@@ -850,6 +870,7 @@ def start_job_async(job_id: str):
             _engine_queues[engine].append(job_id)
 
 
+@tracecall
 def remove_job_from_engine_queue(job_id: str, engine: str = None):
     """Remove a waiting job from the engine queue (used for cancellation)."""
     with _engine_guard:

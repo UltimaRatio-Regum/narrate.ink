@@ -5,9 +5,11 @@ Update these settings when using a custom Chatterbox endpoint.
 import os
 import json
 from pathlib import Path
+from narrate_ink_logger import tracecall
 
 TTS_SETTINGS_FILE = Path(__file__).parent.parent / "tts_settings.json"
 
+@tracecall
 def load_tts_settings():
     """Load TTS settings from file."""
     defaults = {
@@ -77,12 +79,14 @@ CHATTERBOX_FREE_CONFIG = {
 }
 
 
+@tracecall
 def is_paid_chatterbox_configured() -> bool:
     """Check if paid Chatterbox API is properly configured."""
     # Only requires space_url to be set (api_key is optional for public spaces)
     return bool(CHATTERBOX_PAID_CONFIG["space_url"])
 
 
+@tracecall
 def get_chatterbox_config(use_paid: bool = False) -> dict:
     """Get the appropriate Chatterbox configuration."""
     if use_paid:

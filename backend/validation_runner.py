@@ -15,6 +15,7 @@ from datetime import datetime
 from typing import Optional
 
 import httpx
+from narrate_ink_logger import tracecall
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,7 @@ logger = logging.getLogger(__name__)
 # Fuzzy-matching algorithms (pure stdlib)
 # ─────────────────────────────────────────────
 
+@tracecall
 def _normalize(text: str) -> str:
     """Lower-case, strip non-alphanumeric (keep spaces), collapse whitespace."""
     text = re.sub(r"[^a-z0-9 ]", "", text.lower())
@@ -33,6 +35,7 @@ def _normalize(text: str) -> str:
 # (pure stdlib, no external deps)
 # ─────────────────────────────────────────────
 
+@tracecall
 def _dm_word(word: str) -> str:
     """
     Double Metaphone — returns the *primary* phonetic code for a single word.
@@ -60,11 +63,13 @@ def _dm_word(word: str) -> str:
     i = 0
     length = len(word)
 
+    @tracecall
     def at(*pos_chars: tuple) -> bool:
         """True if word[i+offset] == char (handles bounds)."""
         # Called as at(0,'A') or at(1,'B','C')
         return False  # replaced by inline checks below
 
+    @tracecall
     def ch(offset: int) -> str:
         pos = i + offset
         return word[pos] if 0 <= pos < length else ""
@@ -254,6 +259,7 @@ def _dm_word(word: str) -> str:
     return "".join(result)
 
 
+@tracecall
 def _phonetic_repr(text: str) -> str:
     """
     Convert text to a Double Metaphone phonetic representation.
@@ -269,10 +275,12 @@ def _phonetic_repr(text: str) -> str:
     return " ".join(codes)
 
 
+@tracecall
 def _sequence_matcher(a: str, b: str) -> float:
     return difflib.SequenceMatcher(None, _normalize(a), _normalize(b)).ratio()
 
 
+@tracecall
 def _levenshtein(a: str, b: str) -> float:
     """Normalized Levenshtein similarity: 1 - (edit_distance / max_len)."""
     a, b = _normalize(a), _normalize(b)
@@ -290,6 +298,7 @@ def _levenshtein(a: str, b: str) -> float:
     return 1.0 - prev[lb] / max_len
 
 
+@tracecall
 def _token_sort(a: str, b: str) -> float:
     """Sort tokens before comparing (order-invariant)."""
     a_sorted = " ".join(sorted(_normalize(a).split()))
@@ -297,6 +306,7 @@ def _token_sort(a: str, b: str) -> float:
     return difflib.SequenceMatcher(None, a_sorted, b_sorted).ratio()
 
 
+@tracecall
 def _jaro_winkler(a: str, b: str) -> float:
     """Jaro-Winkler similarity."""
     a, b = _normalize(a), _normalize(b)
@@ -337,6 +347,7 @@ def _jaro_winkler(a: str, b: str) -> float:
     return jaro + prefix * 0.1 * (1 - jaro)
 
 
+@tracecall
 def _wer_similarity(a: str, b: str) -> float:
     """Word Error Rate based similarity: 1 - WER, clamped to [0, 1]."""
     ref = _normalize(a).split()
@@ -377,6 +388,7 @@ ALGORITHM_LABELS = {
 }
 
 
+@tracecall
 def _processed_text(text: str, phonetic: bool) -> str:
     """Return the form of *text* that is actually passed to similarity algorithms."""
     if phonetic:
@@ -384,6 +396,7 @@ def _processed_text(text: str, phonetic: bool) -> str:
     return _normalize(text)
 
 
+@tracecall
 def compute_scores(source_text: str, stt_text: str, algorithms: list[str], phonetic: bool = False) -> dict[str, float]:
     if phonetic:
         source_text = _phonetic_repr(source_text)
@@ -399,6 +412,7 @@ def compute_scores(source_text: str, stt_text: str, algorithms: list[str], phone
     return scores
 
 
+@tracecall
 def combine_scores(scores: dict[str, float], method: str, drop_worst_n: int) -> float:
     values = list(scores.values())
     if not values:
@@ -418,12 +432,14 @@ def combine_scores(scores: dict[str, float], method: str, drop_worst_n: int) -> 
 # STT via OpenRouter
 # ─────────────────────────────────────────────
 
+@tracecall
 def _is_stt_model(model: str) -> bool:
     """Return True for dedicated STT models that use /audio/transcriptions (Whisper variants)."""
     lower = model.lower()
     return "whisper" in lower or lower.endswith("-stt") or "/stt" in lower
 
 
+@tracecall
 async def _transcribe_audio(audio_bytes: bytes, model: str, mime: str = "audio/mpeg") -> str:
     """Send audio to OpenRouter and return the transcript.
 
@@ -486,6 +502,7 @@ async def _transcribe_audio(audio_bytes: bytes, model: str, mime: str = "audio/m
 # Background validation job
 # ─────────────────────────────────────────────
 
+@tracecall
 def run_validation_background(project_id: str, job_id: str, config: dict):
     """Spawn a daemon thread to run validation for a project."""
     thread = threading.Thread(
@@ -497,10 +514,12 @@ def run_validation_background(project_id: str, job_id: str, config: dict):
     return thread
 
 
+@tracecall
 def _run_validation_sync(project_id: str, job_id: str, config: dict):
     asyncio.run(_run_validation_async(project_id, job_id, config))
 
 
+@tracecall
 async def _run_validation_async(project_id: str, job_id: str, config: dict):
     from database import (
         get_db_session, TTSJob, JobStatus, ProjectChunk, ProjectSection,
@@ -676,6 +695,7 @@ async def _run_validation_async(project_id: str, job_id: str, config: dict):
         await _regenerate_chunks(project_id, flagged_chunk_ids, job_id=job_id)
 
 
+@tracecall
 async def _regenerate_chunks(project_id: str, chunk_ids: list[str], job_id: str | None = None):
     """Submit flagged chunks for TTS re-generation and mark them as regenerated."""
     import httpx as _httpx

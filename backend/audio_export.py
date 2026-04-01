@@ -23,12 +23,14 @@ from mutagen.id3 import (
     ID3, TIT2, TPE1, TPE2, TALB, TCON, TDRC, COMM, TRCK, APIC
 )
 from mutagen.mp4 import MP4, MP4Cover
+from narrate_ink_logger import tracecall
 
 logger = logging.getLogger(__name__)
 
 ProgressCallback = Callable[[str, int, int, str], None]
 
 
+@tracecall
 def _safe_str(value, fallback: str = "") -> str:
     """Return a clean Unicode string, safely decoding bytes if necessary."""
     if value is None:
@@ -45,6 +47,7 @@ def _safe_str(value, fallback: str = "") -> str:
     return str(value)
 
 
+@tracecall
 def _pairwise_merge(segments: List[AudioSegment]) -> AudioSegment:
     if len(segments) == 0:
         return AudioSegment.empty()
@@ -70,6 +73,7 @@ def _pairwise_merge(segments: List[AudioSegment]) -> AudioSegment:
     return segments[0]
 
 
+@tracecall
 def _apply_id3_tags(
     mp3_bytes: bytes,
     title: str,
@@ -115,6 +119,7 @@ def _apply_id3_tags(
     return out.getvalue()
 
 
+@tracecall
 def _build_mp3_segment_with_progress(
     audio_blobs: List[bytes],
     pause_ms: int = 500,
@@ -174,6 +179,7 @@ def _build_mp3_segment_with_progress(
     return segments[0]
 
 
+@tracecall
 def export_single_mp3(
     chapter_audio: List[Tuple[str, List[bytes]]],
     title: str,
@@ -221,6 +227,7 @@ def export_single_mp3(
     return result
 
 
+@tracecall
 def export_mp3_per_chapter(
     chapter_audio: List[Tuple[str, List[bytes]]],
     title: str,
@@ -287,6 +294,7 @@ def export_mp3_per_chapter(
     return zip_bytes
 
 
+@tracecall
 def _parse_ffmpeg_progress(line: str) -> Optional[float]:
     import re
     m = re.search(r'out_time_ms=(\d+)', line)
@@ -312,6 +320,7 @@ _M4B_CH = 1
 _M4B_SW = 2  # bytes per sample (s16le)
 
 
+@tracecall
 def _blob_duration_ms(blob: bytes) -> int:
     """Return blob duration in milliseconds.
     Uses mutagen for a fast header-only read on MP3; falls back to a full pydub decode."""
@@ -321,6 +330,7 @@ def _blob_duration_ms(blob: bytes) -> int:
         return len(AudioSegment.from_file(io.BytesIO(blob)))
 
 
+@tracecall
 def _decode_blob_to_pcm(blob: bytes) -> bytes:
     """Decode any audio blob to raw s16le PCM at the M4B target format."""
     seg = AudioSegment.from_file(io.BytesIO(blob))
@@ -328,12 +338,14 @@ def _decode_blob_to_pcm(blob: bytes) -> bytes:
     return seg.raw_data
 
 
+@tracecall
 def _silence_pcm_ms(duration_ms: int) -> bytes:
     """Return raw s16le silence of the requested duration."""
     num_samples = int(_M4B_SR * duration_ms / 1000)
     return bytes(num_samples * _M4B_CH * _M4B_SW)
 
 
+@tracecall
 def export_m4b(
     chapter_audio: List[Tuple[str, List[bytes]]],
     title: str,
@@ -386,6 +398,7 @@ def export_m4b(
         # ------------------------------------------------------------------ #
         # Write ffmetadata                                                      #
         # ------------------------------------------------------------------ #
+        @tracecall
         def _esc_ffmeta(val: str) -> str:
             return val.replace("\\", "\\\\").replace("=", "\\=").replace(";", "\\;").replace("#", "\\#").replace("\n", "\\\n")
 
@@ -442,6 +455,7 @@ def export_m4b(
         stderr_lines: List[str] = []
         last_encode_pct = [0]
 
+        @tracecall
         def _read_stderr():
             for raw_line in proc.stderr:
                 line = raw_line.decode("utf-8", errors="replace")

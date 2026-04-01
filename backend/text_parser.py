@@ -9,6 +9,7 @@ from typing import Optional
 from textblob import TextBlob
 
 from models import TextSegment, Sentiment
+from narrate_ink_logger import tracecall
 
 
 class TextParser:
@@ -32,6 +33,7 @@ class TextParser:
     WORDS_PER_SECOND = 2.5
     TARGET_CHUNK_SECONDS = 10.0
     
+    @tracecall
     def parse(self, text: str, known_speakers: list[str] | None = None) -> tuple[list[TextSegment], list[str]]:
         """
         Parse text into segments and detect speakers.
@@ -112,6 +114,7 @@ class TextParser:
         
         return chunked_segments, sorted(list(speakers_set))
     
+    @tracecall
     def _create_segment(
         self,
         text: str,
@@ -139,6 +142,7 @@ class TextParser:
     PRONOUNS_MALE = {"he", "him", "his"}
     PRONOUNS_FEMALE = {"she", "her", "hers"}
 
+    @tracecall
     def _find_speaker_improved(
         self, 
         text: str, 
@@ -187,6 +191,7 @@ class TextParser:
         "i", "me", "my", "we", "us", "our", "you", "your",
     }
 
+    @tracecall
     def _find_named_speaker_in_tag(self, ctx_before: str, ctx_after: str) -> Optional[str]:
         ctx_after_clean = re.sub(r'^[\s""\u201c\u201d,]+', '', ctx_after)
         for ctx, is_after in [(ctx_after_clean, True), (ctx_before, False)]:
@@ -206,6 +211,7 @@ class TextParser:
                         return name
         return None
 
+    @tracecall
     def _find_multiword_speaker_in_tag(self, ctx_after: str, ctx_before: str) -> Optional[str]:
         for verb in self.DIALOGUE_VERBS:
             pat = rf'^\s*,?\s*{verb}[sd]?\s+(the\s+\w+(?:\s+\w+)?)'
@@ -218,6 +224,7 @@ class TextParser:
                 return m2.group(1).strip()
         return None
 
+    @tracecall
     def _resolve_pronoun_speaker(
         self, ctx_before: str, ctx_after: str, full_text: str,
         quote_start: int, speaker_history: list[str]
@@ -274,6 +281,7 @@ class TextParser:
 
         return None
 
+    @tracecall
     def _build_speaker_normalization_map(self, speakers: set[str]) -> dict[str, str]:
         name_map: dict[str, str] = {}
         speaker_list = sorted(speakers, key=len)
@@ -286,6 +294,7 @@ class TextParser:
 
         return name_map
 
+    @tracecall
     def _find_speaker_in_narration(self, ctx_before: str, speaker_history: list[str]) -> Optional[str]:
         sentences = [s for s in re.split(r'[.!?]\s+', ctx_before) if s.strip()]
         last_sentence = sentences[-1] if sentences else ctx_before
@@ -313,6 +322,7 @@ class TextParser:
 
         return None
 
+    @tracecall
     def _infer_turn_taking(self, speaker_history: list[str]) -> Optional[str]:
         if len(speaker_history) < 2:
             return None
@@ -345,6 +355,7 @@ class TextParser:
         "calm": ["calm", "peaceful", "serene", "tranquil", "quiet", "still", "relaxed", "composed"],
     }
 
+    @tracecall
     def _analyze_sentiment(self, text: str) -> Sentiment:
         """
         Analyze sentiment of text using TextBlob + keyword matching.
@@ -385,6 +396,7 @@ class TextParser:
         except Exception:
             return Sentiment(label="neutral", score=0.5)
     
+    @tracecall
     def _split_by_paragraphs(self, segments: list[TextSegment]) -> list[TextSegment]:
         """
         Split segments at paragraph boundaries (double newlines).
@@ -421,6 +433,7 @@ class TextParser:
         
         return result
 
+    @tracecall
     def _chunk_all_segments(self, segments: list[TextSegment]) -> list[TextSegment]:
         """
         Chunk all segments into approximately 10-second intervals.
@@ -456,6 +469,7 @@ class TextParser:
         
         return chunked
     
+    @tracecall
     def _split_text_smart(self, text: str, target_words: int) -> list[str]:
         """
         Split text into chunks following priority:
@@ -496,6 +510,7 @@ class TextParser:
         
         return chunks
     
+    @tracecall
     def _words_to_chars(self, text: str, word_count: int) -> int:
         """Convert word count to approximate character position."""
         words = text.split()
@@ -514,6 +529,7 @@ class TextParser:
         avg_chars = len(text) / max(1, len(words))
         return int(word_count * avg_chars)
     
+    @tracecall
     def _find_best_split(self, text: str, target_pos: int) -> int:
         """
         Find the best split point near target_pos following priority:

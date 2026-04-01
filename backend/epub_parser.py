@@ -8,9 +8,11 @@ import ebooklib
 from ebooklib import epub
 
 import logging
+from narrate_ink_logger import tracecall
 logger = logging.getLogger(__name__)
 
 
+@tracecall
 def extract_text_from_html(html_content: bytes) -> str:
     """Extract clean text from HTML content."""
     soup = BeautifulSoup(html_content, 'lxml')
@@ -28,6 +30,7 @@ def extract_text_from_html(html_content: bytes) -> str:
     return text.strip()
 
 
+@tracecall
 def extract_title_from_html(html_content: bytes) -> str:
     """Extract title/heading from HTML content."""
     soup = BeautifulSoup(html_content, 'lxml')
@@ -42,6 +45,7 @@ def extract_title_from_html(html_content: bytes) -> str:
     return ""
 
 
+@tracecall
 def _extract_epub_metadata(book) -> Dict[str, Any]:
     """Extract metadata (title, author, year, description, cover image) from an EPUB book object."""
     metadata: Dict[str, Any] = {
@@ -52,6 +56,7 @@ def _extract_epub_metadata(book) -> Dict[str, Any]:
         "cover_image": None,
     }
 
+    @tracecall
     def _first_dc(field: str) -> Optional[str]:
         vals = book.get_metadata('DC', field)
         if vals:
@@ -104,6 +109,7 @@ def _extract_epub_metadata(book) -> Dict[str, Any]:
     return metadata
 
 
+@tracecall
 def _extract_chapters(book) -> List[Tuple[str, str]]:
     """Extract chapter (title, text) tuples from an EPUB book object."""
     chapters = []
@@ -129,6 +135,7 @@ def _extract_chapters(book) -> List[Tuple[str, str]]:
     return chapters
 
 
+@tracecall
 def parse_epub(file_content: bytes) -> List[Tuple[str, str]]:
     """
     Parse an EPUB file and extract chapters.
@@ -148,6 +155,7 @@ def parse_epub(file_content: bytes) -> List[Tuple[str, str]]:
     return chapters
 
 
+@tracecall
 def parse_epub_with_metadata(file_content: bytes) -> Dict[str, Any]:
     """
     Parse an EPUB file and extract chapters along with book metadata.
@@ -168,6 +176,7 @@ def parse_epub_with_metadata(file_content: bytes) -> Dict[str, Any]:
     return {"chapters": chapters, "metadata": metadata}
 
 
+@tracecall
 def parse_txt(file_content: bytes) -> List[Tuple[str, str]]:
     """
     Parse a TXT file.

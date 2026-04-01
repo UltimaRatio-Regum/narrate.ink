@@ -19,6 +19,7 @@ from sqlalchemy import (
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from sqlalchemy.pool import StaticPool
+from narrate_ink_logger import tracecall
 
 logger = _loguru_logger
 
@@ -451,6 +452,7 @@ engine = None
 SessionLocal = None
 
 
+@tracecall
 def _migrate_columns(db_engine):
     """Add missing columns to existing tables for backward compatibility."""
     from sqlalchemy import text, inspect
@@ -514,6 +516,7 @@ def _migrate_columns(db_engine):
     _create_indexes(db_engine, inspector)
 
 
+@tracecall
 def _create_indexes(db_engine, inspector):
     """Create indexes on FK columns for existing databases."""
     from sqlalchemy import text
@@ -553,6 +556,7 @@ def _create_indexes(db_engine, inspector):
                 logger.debug("Index creation skipped for {}: {}", idx_name, e)
 
 
+@tracecall
 def _assign_orphaned_records(session):
     """Assign records with NULL user_id to the seed admin account."""
     try:
@@ -576,10 +580,12 @@ def _assign_orphaned_records(session):
         logger.warning(f"Could not assign orphaned records: {e}")
 
 
+@tracecall
 def _hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 
+@tracecall
 def _seed_admin(session):
     logger.trace("_seed_admin: checking for existing users")
     existing = session.query(User).first()
@@ -607,6 +613,7 @@ def _seed_admin(session):
         logger.trace("_seed_admin: existing users found — skipping seed (first user: {})", existing.username)
 
 
+@tracecall
 def init_database():
     """Initialize the database connection and create tables."""
     global engine, SessionLocal
@@ -651,6 +658,7 @@ def init_database():
     return engine
 
 
+@tracecall
 def get_db():
     """Get a database session."""
     if SessionLocal is None:
@@ -662,6 +670,7 @@ def get_db():
         db.close()
 
 
+@tracecall
 def get_db_session():
     """Get a database session directly (not as generator)."""
     if SessionLocal is None:
