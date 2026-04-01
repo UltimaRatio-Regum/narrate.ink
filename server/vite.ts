@@ -5,10 +5,13 @@ import viteConfig from "../vite.config";
 import fs from "fs";
 import path from "path";
 import { nanoid } from "nanoid";
+import { logTrace, logInfo, logError } from "./logger";
 
 const viteLogger = createLogger();
 
 export async function setupVite(server: Server, app: Express) {
+  logTrace("Creating Vite dev server", { source: "vite" });
+
   const serverOptions = {
     middlewareMode: true,
     hmr: { server, path: "/vite-hmr" },
@@ -21,6 +24,7 @@ export async function setupVite(server: Server, app: Express) {
     customLogger: {
       ...viteLogger,
       error: (msg, options) => {
+        logError(msg, { source: "vite" });
         viteLogger.error(msg, options);
         process.exit(1);
       },
@@ -29,6 +33,7 @@ export async function setupVite(server: Server, app: Express) {
     appType: "custom",
   });
 
+  logInfo("Vite dev server ready, mounting middleware", { source: "vite" });
   app.use(vite.middlewares);
 
   app.use("/{*path}", async (req, res, next) => {

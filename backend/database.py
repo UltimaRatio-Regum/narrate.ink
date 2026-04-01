@@ -9,6 +9,8 @@ from datetime import datetime
 from typing import Optional, List
 from enum import Enum
 
+from loguru import logger as _loguru_logger
+
 import bcrypt
 from sqlalchemy import (
     Column, String, Integer, Float, DateTime, Text, ForeignKey, 
@@ -18,7 +20,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from sqlalchemy.pool import StaticPool
 
-logger = logging.getLogger(__name__)
+logger = _loguru_logger
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
@@ -452,9 +454,10 @@ SessionLocal = None
 def _migrate_columns(db_engine):
     """Add missing columns to existing tables for backward compatibility."""
     from sqlalchemy import text, inspect
-    
+
+    logger.trace("_migrate_columns: inspecting existing schema")
     inspector = inspect(db_engine)
-    
+
     migrations = [
         ("projects", "user_id", "ALTER TABLE projects ADD COLUMN user_id VARCHAR REFERENCES users(id)"),
         ("custom_voices", "user_id", "ALTER TABLE custom_voices ADD COLUMN user_id VARCHAR REFERENCES users(id)"),
@@ -494,16 +497,20 @@ def _migrate_columns(db_engine):
             try:
                 columns = [c["name"] for c in inspector.get_columns(table_name)]
                 if column_name not in columns:
+                    logger.trace("_migrate_columns: applying — {}.{}", table_name, column_name)
                     conn.execute(text(sql))
                     conn.commit()
-                    logger.info(f"Added column {column_name} to {table_name}")
+                    logger.info("Added column {} to {}", column_name, table_name)
+                else:
+                    logger.trace("_migrate_columns: column already exists — {}.{}", table_name, column_name)
             except Exception as e:
                 try:
                     conn.rollback()
                 except Exception:
                     pass
-                logger.debug(f"Migration skipped for {table_name}.{column_name}: {e}")
+                logger.debug("Migration skipped for {}.{}: {}", table_name, column_name, e)
 
+    logger.trace("_migrate_columns: done; proceeding to index creation")
     _create_indexes(db_engine, inspector)
 
 
@@ -511,6 +518,7 @@ def _create_indexes(db_engine, inspector):
     """Create indexes on FK columns for existing databases."""
     from sqlalchemy import text
 
+    logger.trace("_create_indexes: checking indexes")
     index_defs = [
         ("ix_tts_segments_job_id", "tts_segments", "job_id"),
         ("ix_tts_jobs_status", "tts_jobs", "status"),
@@ -526,20 +534,23 @@ def _create_indexes(db_engine, inspector):
         existing_tables = inspector.get_table_names()
         for idx_name, table_name, columns in index_defs:
             if table_name not in existing_tables:
+                logger.trace("_create_indexes: table {} not found, skipping {}", table_name, idx_name)
                 continue
             existing_indexes = {idx["name"] for idx in inspector.get_indexes(table_name) if idx.get("name")}
             if idx_name in existing_indexes:
+                logger.trace("_create_indexes: index {} already exists", idx_name)
                 continue
             try:
+                logger.trace("_create_indexes: creating {} on {}({})", idx_name, table_name, columns)
                 conn.execute(text(f"CREATE INDEX IF NOT EXISTS {idx_name} ON {table_name} ({columns})"))
                 conn.commit()
-                logger.info(f"Created index {idx_name} on {table_name}({columns})")
+                logger.info("Created index {} on {}({})", idx_name, table_name, columns)
             except Exception as e:
                 try:
                     conn.rollback()
                 except Exception:
                     pass
-                logger.debug(f"Index creation skipped for {idx_name}: {e}")
+                logger.debug("Index creation skipped for {}: {}", idx_name, e)
 
 
 def _assign_orphaned_records(session):
@@ -570,8 +581,10 @@ def _hash_password(password: str) -> str:
 
 
 def _seed_admin(session):
+    logger.trace("_seed_admin: checking for existing users")
     existing = session.query(User).first()
     if existing is None:
+        logger.trace("_seed_admin: no users found — creating default Administrator account")
         admin = User(
             id=str(uuid.uuid4()),
             username="Administrator",
@@ -585,41 +598,56 @@ def _seed_admin(session):
 
         reg_setting = session.query(SystemSetting).filter(SystemSetting.key == "registration_mode").first()
         if reg_setting is None:
+            logger.trace("_seed_admin: seeding registration_mode=disabled system setting")
             session.add(SystemSetting(key="registration_mode", value="disabled"))
 
         session.commit()
         logger.info("Seeded administrator account (username: Administrator, password: ChangeMe)")
+    else:
+        logger.trace("_seed_admin: existing users found — skipping seed (first user: {})", existing.username)
 
 
 def init_database():
     """Initialize the database connection and create tables."""
     global engine, SessionLocal
-    
+
+    logger.trace("init_database: entry — DATABASE_URL={}", DATABASE_URL[:DATABASE_URL.index("@")] + "@***" if "@" in (DATABASE_URL or "") else DATABASE_URL or "(not set)")
+
     if not DATABASE_URL:
-        print("WARNING: DATABASE_URL not set, using in-memory SQLite")
+        logger.warning("DATABASE_URL not set, using in-memory SQLite")
         engine = create_engine(
             "sqlite:///:memory:",
             connect_args={"check_same_thread": False},
             poolclass=StaticPool
         )
+        logger.trace("init_database: created in-memory SQLite engine")
     else:
+        logger.trace("init_database: creating PostgreSQL engine")
         engine = create_engine(DATABASE_URL)
-    
+        logger.debug("init_database: PostgreSQL engine created")
+
+    logger.trace("init_database: running Base.metadata.create_all")
     Base.metadata.create_all(bind=engine)
+    logger.trace("init_database: all tables created/verified")
+
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    logger.trace("init_database: session factory configured")
 
     _migrate_columns(engine)
 
     try:
         session = SessionLocal()
+        logger.trace("init_database: running _seed_admin")
         try:
             _seed_admin(session)
+            logger.trace("init_database: running _assign_orphaned_records")
             _assign_orphaned_records(session)
         finally:
             session.close()
     except Exception as e:
-        logger.warning(f"Could not seed admin account: {e}")
+        logger.warning("Could not seed admin account: {}", e)
 
+    logger.debug("init_database: complete")
     return engine
 
 

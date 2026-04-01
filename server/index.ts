@@ -6,12 +6,15 @@ import { serveStatic } from "./static";
 import { createServer } from "http";
 import { startPythonBackend } from "./python-backend";
 import { setupAuth } from "./auth";
+import { logger, logTrace, logInfo, logWarn, logError, logHttp } from "./logger";
 
 const app = express();
 const httpServer = createServer(app);
 
-app.use(helmet({ contentSecurityPolicy: false }));
+logTrace("Express app created", { source: "express" });
 
+app.use(helmet({ contentSecurityPolicy: false }));
+logTrace("Helmet middleware registered", { source: "express" });
 
 declare module "http" {
   interface IncomingMessage {
@@ -19,15 +22,9 @@ declare module "http" {
   }
 }
 
+/** Compatibility shim — keeps existing callers working unchanged. */
 export function log(message: string, source = "express") {
-  const formattedTime = new Date().toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: true,
-  });
-
-  console.log(`${formattedTime} [${source}] ${message}`);
+  logInfo(message, { source });
 }
 
 app.use((req, res, next) => {
@@ -44,12 +41,24 @@ app.use((req, res, next) => {
   res.on("finish", () => {
     const duration = Date.now() - start;
     if (path.startsWith("/api")) {
-      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
+      const meta: Record<string, unknown> = {
+        source: "http",
+        method: req.method,
+        path,
+        status: res.statusCode,
+        duration_ms: duration,
+      };
       if (capturedJsonResponse && res.statusCode >= 400) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
+        meta.response = capturedJsonResponse;
       }
-
-      log(logLine);
+      const logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
+      if (res.statusCode >= 500) {
+        logError(logLine, meta);
+      } else if (res.statusCode >= 400) {
+        logWarn(logLine, meta);
+      } else {
+        logHttp(logLine, meta);
+      }
     }
   });
 
@@ -57,30 +66,36 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  logTrace("Bootstrap sequence starting", { source: "express" });
+
   if (process.env.SKIP_PYTHON_SPAWN === "1") {
-    log("SKIP_PYTHON_SPAWN is set, assuming Python backend is managed externally", "python");
+    logInfo("SKIP_PYTHON_SPAWN is set, assuming Python backend is managed externally", { source: "python" });
   } else {
+    logTrace("Spawning Python FastAPI backend", { source: "python" });
     try {
       await startPythonBackend();
-      log("Python backend started successfully");
+      logInfo("Python backend started successfully", { source: "python" });
     } catch (err) {
-      log(`Warning: Python backend failed to start: ${err}`, "python-err");
-      log("Continuing without Python backend...", "express");
+      logWarn(`Python backend failed to start: ${err}`, { source: "python" });
+      logInfo("Continuing without Python backend", { source: "express" });
     }
   }
 
+  logTrace("Registering express.json + urlencoded middleware", { source: "express" });
   app.use(express.json());
   app.use(express.urlencoded({ extended: false }));
 
+  logTrace("Setting up auth", { source: "express" });
   await setupAuth(app);
 
+  logTrace("Registering routes", { source: "express" });
   await registerRoutes(httpServer, app);
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";
 
-    console.error("Internal Server Error:", err);
+    logError("Internal Server Error", { source: "express", status, message, stack: err.stack });
 
     if (res.headersSent) {
       return next(err);
@@ -90,8 +105,10 @@ app.use((req, res, next) => {
   });
 
   if (process.env.NODE_ENV === "production") {
+    logTrace("Serving static assets (production)", { source: "express" });
     serveStatic(app);
   } else {
+    logTrace("Setting up Vite dev middleware", { source: "express" });
     const { setupVite } = await import("./vite");
     await setupVite(httpServer, app);
   }
@@ -104,7 +121,7 @@ app.use((req, res, next) => {
       reusePort: true,
     },
     () => {
-      log(`serving on port ${port}`);
+      logInfo(`narrate.ink server listening on port ${port}`, { source: "express", port });
     },
   );
 })();
