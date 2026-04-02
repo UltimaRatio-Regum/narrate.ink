@@ -60,6 +60,9 @@ COPY --from=python-deps /usr/local/lib/python3.11/site-packages /usr/local/lib/p
 COPY --from=python-deps /usr/local/bin /usr/local/bin
 
 COPY --from=frontend-build /app/dist ./dist
+# connect-pg-simple resolves table.sql relative to __dirname, which esbuild
+# rewrites to the dist/ directory. Copy it there so the session store can find it.
+COPY --from=frontend-build /app/node_modules/connect-pg-simple/table.sql ./dist/table.sql
 COPY --from=frontend-build /app/node_modules ./node_modules
 COPY --from=frontend-build /app/package.json ./
 
