@@ -9,6 +9,7 @@ import { setupAuth } from "./auth";
 import { logger, logTrace, logInfo, logWarn, logError, logHttp } from "./logger";
 
 const app = express();
+app.set('trust proxy', 1);
 const httpServer = createServer(app);
 
 logTrace("Express app created", { source: "express" });
