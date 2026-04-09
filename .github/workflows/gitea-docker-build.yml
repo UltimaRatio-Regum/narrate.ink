@@ -1,0 +1,113 @@
+name: Build and Push Docker Image
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main, master ]
+
+env:
+  REGISTRY: https://njregistry.ntj.services
+  GITEA_SERVER_URL: http://192.168.55.51:3000
+
+jobs:
+  build-and-push:
+    if: github.server_url != 'https://github.com'
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Debug registry settings and connectivity before forcing LAN server URL
+        run: |
+          echo "Registry URL: ${{ env.REGISTRY }}"
+          echo "Actor: ${{ gitea.actor }}"
+          echo "Repository: ${{ gitea.repository }}"
+          echo ""
+          echo "Testing connectivity..."
+          echo "Testing LAN IP (should work):"
+          curl -I http://192.168.55.51:3000 || echo "LAN IP failed"
+          echo ""
+          echo "Testing external domain (might fail):"
+          curl -I https://njgitea.ntj.services || echo "External domain failed"
+          echo ""
+          echo "DNS resolution test:"
+          nslookup njgitea.ntj.services || echo "DNS lookup failed"
+      - name: Force LAN server URL
+        run: git config --global url."http://192.168.55.51:3000/".insteadOf "http://127.0.0.1:3000/"
+      - name: Pre-auth to Gitea (Basic header)
+        run: |
+          set -euo pipefail
+          HOST=http://192.168.55.51:3000/
+          AUTH_HDR="$(printf 'AUTHORIZATION: Basic %s' "$(printf '%s:%s' 'nxj18' '${{ secrets.TOKEN_GITEA_PACKAGE }}' | base64 -w0)")"
+          git config --global http."$HOST".extraheader "$AUTH_HDR"
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Debug registry settings and connectivity
+        run: |
+          echo "Registry URL: ${{ env.REGISTRY }}"
+          echo "Actor: ${{ gitea.actor }}"
+          echo "Repository: ${{ gitea.repository }}"
+          echo ""
+          echo "Testing connectivity..."
+          echo "Testing LAN IP (should work):"
+          curl -I http://192.168.55.51:3000 || echo "LAN IP failed"
+          echo ""
+          echo "Testing external domain (might fail):"
+          curl -I https://njgitea.ntj.services || echo "External domain failed"
+          echo ""
+          echo "DNS resolution test:"
+          nslookup njgitea.ntj.services || echo "DNS lookup failed"
+        
+          
+      - name: Login to registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ gitea.actor }}
+          password: ${{ secrets.NJREGISTRY_PASS }}
+          
+      - name: Create image tags
+        id: tags
+        run: |
+          # Create tags based on the current branch/ref
+          BRANCH_NAME=${GITHUB_REF#refs/heads/}
+          BRANCH_NAME=${BRANCH_NAME:-main}
+          COMMIT_SHA=${GITHUB_SHA:0:7}
+          
+          # Extract registry hostname without protocol
+          REGISTRY_HOST=${REGISTRY#https://}
+          REGISTRY_HOST=${REGISTRY_HOST#http://}
+          
+          # Create the main tag (format: registry-host/namespace/image:tag)
+          MAIN_TAG="$REGISTRY_HOST/${{ gitea.actor }}/gitea-github-wrapper:$BRANCH_NAME"
+          
+          # Create commit-based tag
+          COMMIT_TAG="$REGISTRY_HOST/${{ gitea.actor }}/gitea-github-wrapper:$BRANCH_NAME-$COMMIT_SHA"
+          
+          # Create latest tag if on main branch
+          if [ "$BRANCH_NAME" = "main" ] || [ "$BRANCH_NAME" = "master" ]; then
+            LATEST_TAG="$REGISTRY_HOST/${{ gitea.actor }}/gitea-github-wrapper:latest"
+            echo "tags=$MAIN_TAG,$COMMIT_TAG,$LATEST_TAG" >> $GITHUB_OUTPUT
+          else
+            echo "tags=$MAIN_TAG,$COMMIT_TAG" >> $GITHUB_OUTPUT
+          fi
+          
+          echo "Created tags: $MAIN_TAG, $COMMIT_TAG"
+            
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          
+      - name: Output image info
+        run: |
+          echo "Image tags: ${{ steps.tags.outputs.tags }}"
+          echo "Build completed successfully!"

@@ -12,8 +12,6 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  HARBOR_REGISTRY: harbor.ntj.services
-  HARBOR_PROJECT: library
   # github.repository preserves original casing (UltimaRatio-Regum/tomevox).
   # OCI registry refs must be lowercase, so we compute IMAGE_NAME_LC in step 2
   # and use that everywhere a registry reference appears.
@@ -21,6 +19,7 @@ env:
 jobs:
   build-and-push:
     name: Build & push multi-platform image
+    if: github.server_url == 'https://github.com'
     runs-on: ubuntu-latest
 
     # Required for writing to ghcr.io and attesting the image
@@ -74,14 +73,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # ── 5b. Log in to Harbor ───────────────────────────────────────────────
-      - name: Log in to Harbor registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.HARBOR_REGISTRY }}
-          username: robot$github-action
-          password: ${{ secrets.HARBOR_ROBOT_TOKEN }}
-
       # ── 6. Extract metadata (tags + labels) ───────────────────────────────
       # docker/metadata-action reads GITHUB_REF and generates sensible tags.
       # We customise it so that:
@@ -93,7 +84,6 @@ jobs:
         with:
           images: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}
-            ${{ env.HARBOR_REGISTRY }}/${{ env.HARBOR_PROJECT }}/${{ github.event.repository.name }}
           tags: |
             # Always tag with the exact git tag
             type=ref,event=tag
@@ -147,5 +137,4 @@ jobs:
           echo "| **Digest** | \`${{ steps.push.outputs.digest }}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| **Platforms** | \`linux/amd64\`, \`linux/arm64\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| **GHCR** | \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| **Harbor** | \`${{ env.HARBOR_REGISTRY }}/${{ env.HARBOR_PROJECT }}/${{ github.event.repository.name }}\` |" >> "$GITHUB_STEP_SUMMARY"
 
