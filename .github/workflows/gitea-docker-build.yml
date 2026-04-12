@@ -73,23 +73,27 @@ jobs:
         id: tags
         run: |
           # Create tags based on the current branch/ref
-          BRANCH_NAME=${GITHUB_REF#refs/heads/}
-          BRANCH_NAME=${BRANCH_NAME:-main}
+          REF_NAME=${GITHUB_REF#refs/heads/}
+          REF_NAME=${REF_NAME#refs/tags/}
+          BRANCH_NAME=${REF_NAME:-main}
           COMMIT_SHA=${GITHUB_SHA:0:7}
           
           # Extract registry hostname without protocol
           REGISTRY_HOST=${REGISTRY#https://}
           REGISTRY_HOST=${REGISTRY_HOST#http://}
-          
+
+          # Extract repo name from GITHUB_REPOSITORY (owner/repo -> repo)
+          REPO_NAME=${GITHUB_REPOSITORY##*/}
+
           # Create the main tag (format: registry-host/namespace/image:tag)
-          MAIN_TAG="$REGISTRY_HOST/${{ gitea.actor }}/gitea-github-wrapper:$BRANCH_NAME"
-          
+          MAIN_TAG="$REGISTRY_HOST/${{ gitea.actor }}/$REPO_NAME:$BRANCH_NAME"
+
           # Create commit-based tag
-          COMMIT_TAG="$REGISTRY_HOST/${{ gitea.actor }}/gitea-github-wrapper:$BRANCH_NAME-$COMMIT_SHA"
-          
+          COMMIT_TAG="$REGISTRY_HOST/${{ gitea.actor }}/$REPO_NAME:$BRANCH_NAME-$COMMIT_SHA"
+
           # Create latest tag if on main branch
           if [ "$BRANCH_NAME" = "main" ] || [ "$BRANCH_NAME" = "master" ]; then
-            LATEST_TAG="$REGISTRY_HOST/${{ gitea.actor }}/gitea-github-wrapper:latest"
+            LATEST_TAG="$REGISTRY_HOST/${{ gitea.actor }}/$REPO_NAME:latest"
             echo "tags=$MAIN_TAG,$COMMIT_TAG,$LATEST_TAG" >> $GITHUB_OUTPUT
           else
             echo "tags=$MAIN_TAG,$COMMIT_TAG" >> $GITHUB_OUTPUT
